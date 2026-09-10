@@ -22,5 +22,28 @@
     "limited": false,
     "disabledPlatforms": [],
     "supportsExternalPlayer": true
+  },
+  {
+    "id": "kkphim",
+    "name": "KKPhim (Vietsub)",
+    "description": "Nguồn phim Vietsub/Thuyết Minh từ phimapi.com (kkphim.com). Lookup trực tiếp bằng TMDB ID.",
+    "version": "1.0.0",
+    "author": "towjacix",
+    "supportedTypes": [
+      "movie",
+      "tv"
+    ],
+    "filename": "providers/kkphim.js",
+    "enabled": true,
+    "logo": "",
+    "contentLanguage": [
+      "vi"
+    ],
+    "formats": [
+      "m3u8"
+    ],
+    "limited": false,
+    "disabledPlatforms": [],
+    "supportsExternalPlayer": true
   }
 ]

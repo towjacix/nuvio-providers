@@ -1,0 +1,170 @@
+/**
+ * kkphim - Built from src/kkphim/
+ * Generated: 2026-09-10T08:21:10.302Z
+ */
+var __defProp = Object.defineProperty;
+var __defProps = Object.defineProperties;
+var __getOwnPropDescs = Object.getOwnPropertyDescriptors;
+var __getOwnPropSymbols = Object.getOwnPropertySymbols;
+var __hasOwnProp = Object.prototype.hasOwnProperty;
+var __propIsEnum = Object.prototype.propertyIsEnumerable;
+var __defNormalProp = (obj, key, value) => key in obj ? __defProp(obj, key, { enumerable: true, configurable: true, writable: true, value }) : obj[key] = value;
+var __spreadValues = (a, b) => {
+  for (var prop in b || (b = {}))
+    if (__hasOwnProp.call(b, prop))
+      __defNormalProp(a, prop, b[prop]);
+  if (__getOwnPropSymbols)
+    for (var prop of __getOwnPropSymbols(b)) {
+      if (__propIsEnum.call(b, prop))
+        __defNormalProp(a, prop, b[prop]);
+    }
+  return a;
+};
+var __spreadProps = (a, b) => __defProps(a, __getOwnPropDescs(b));
+var __async = (__this, __arguments, generator) => {
+  return new Promise((resolve, reject) => {
+    var fulfilled = (value) => {
+      try {
+        step(generator.next(value));
+      } catch (e) {
+        reject(e);
+      }
+    };
+    var rejected = (value) => {
+      try {
+        step(generator.throw(value));
+      } catch (e) {
+        reject(e);
+      }
+    };
+    var step = (x) => x.done ? resolve(x.value) : Promise.resolve(x.value).then(fulfilled, rejected);
+    step((generator = generator.apply(__this, __arguments)).next());
+  });
+};
+
+// src/kkphim/config.js
+var CONFIG = {
+  // Base URL của KKPhim API (public, GET-only, JSON)
+  BASE_URL: "https://phimapi.com",
+  // Header mặc định cho mọi request
+  HEADERS: {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    Accept: "application/json"
+  },
+  // Tên hiển thị trên stream list
+  PROVIDER_NAME: "KKPhim",
+  /**
+   * Strict season matching cho TV shows.
+   * KKPhim's /tmdb/tv/{id} chỉ map tới MỘT entry (season mà họ cập nhật gần nhất),
+   * param ?season= bị bỏ qua (đã verify 2026-09-10: /tmdb/tv/1622 luôn trả Season 10).
+   *
+   * true  → season không khớp thì trả [] (chính xác nội dung)
+   * false → vẫn trả stream nhưng title ghi rõ "[Phần {N}]" để user tự quyết
+   */
+  STRICT_SEASON: true
+};
+
+// src/kkphim/http.js
+function fetchJson(_0) {
+  return __async(this, arguments, function* (url, options = {}) {
+    const response = yield fetch(url, __spreadProps(__spreadValues({}, options), {
+      headers: __spreadValues(__spreadValues({}, CONFIG.HEADERS), options.headers || {})
+    }));
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status} for ${url}`);
+    }
+    return yield response.json();
+  });
+}
+
+// src/kkphim/extractor.js
+var QUALITY_MAP = {
+  FHD: "1080p",
+  FULLHD: "1080p",
+  HD: "720p",
+  SD: "480p",
+  CAM: "CAM"
+};
+function extractStreams(_0, _1, _2, _3) {
+  return __async(this, arguments, function* (tmdbId, mediaType, season, episode, options = {}) {
+    const url = `${CONFIG.BASE_URL}/tmdb/${mediaType}/${tmdbId}`;
+    const data = yield fetchJson(url);
+    return toStreams(data, mediaType, season, episode, options);
+  });
+}
+function toStreams(data, mediaType, season, episode, options = {}) {
+  if (!data || data.status !== true)
+    return [];
+  const movie = data.movie || {};
+  const episodes = data.episodes;
+  if (!Array.isArray(episodes) || episodes.length === 0)
+    return [];
+  const strictSeason = options.strictSeason !== void 0 ? options.strictSeason : CONFIG.STRICT_SEASON;
+  const tmdbSeason = movie.tmdb && movie.tmdb.season != null ? Number(movie.tmdb.season) : null;
+  if (mediaType === "tv" && tmdbSeason != null && Number(season) !== tmdbSeason) {
+    if (strictSeason)
+      return [];
+  }
+  const isMovie = mediaType === "movie";
+  const wantEp = Number(episode);
+  const streams = [];
+  const seen = /* @__PURE__ */ new Set();
+  episodes.forEach((group) => {
+    const server = group && group.server_name || CONFIG.PROVIDER_NAME;
+    const serverData = group && Array.isArray(group.server_data) ? group.server_data : [];
+    serverData.forEach((ep) => {
+      const url = ep && (ep.link_m3u8 || ep.link_embed) || "";
+      if (!url || seen.has(url))
+        return;
+      if (!isMovie) {
+        const epNum = parseInt(String(ep.name || "").replace(/\D/g, ""), 10);
+        if (epNum !== wantEp)
+          return;
+      }
+      seen.add(url);
+      streams.push({
+        name: CONFIG.PROVIDER_NAME,
+        title: buildTitle(ep, server, isMovie ? null : labelFor(tmdbSeason, season, strictSeason)),
+        url,
+        quality: parseQuality(ep.filename, movie.quality)
+      });
+    });
+  });
+  return streams;
+}
+function labelFor(tmdbSeason, season, strictSeason) {
+  if (strictSeason)
+    return null;
+  if (tmdbSeason == null || Number(season) === tmdbSeason)
+    return null;
+  return `[Ph\u1EA7n ${tmdbSeason}]`;
+}
+function buildTitle(ep, server, label) {
+  const base = (ep.filename || ep.name || CONFIG.PROVIDER_NAME).trim();
+  const suffix = label ? `${label} ` : "";
+  return `${suffix}${base} \xB7 ${server}`;
+}
+function parseQuality(filename, movieQuality) {
+  if (filename) {
+    const m = String(filename).match(/(\d{3,4})p/i);
+    if (m)
+      return m[1] + "p";
+    if (/4k/i.test(filename))
+      return "4K";
+  }
+  const q = String(movieQuality || "").toUpperCase();
+  return QUALITY_MAP[q] || void 0;
+}
+
+// src/kkphim/index.js
+function getStreams(tmdbId, mediaType, season, episode, options) {
+  return __async(this, null, function* () {
+    try {
+      return yield extractStreams(tmdbId, mediaType, season, episode, options);
+    } catch (error) {
+      console.error("[KKPhim] Error:", error && error.message ? error.message : String(error));
+      return [];
+    }
+  });
+}
+module.exports = { getStreams };

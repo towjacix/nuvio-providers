@@ -4,7 +4,7 @@
     "description": "Providers for Nuvio Streaming",
     "scripts": {
         "build": "node build.js",
-        "build:watch": "nodemon --watch src -e js,json --exec 'node build.js'",
+        "test": "node --test test/",
         "build:provider": "node build.js",
         "start": "node server.js"
     },
