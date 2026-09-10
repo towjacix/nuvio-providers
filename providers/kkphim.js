@@ -1,6 +1,6 @@
 /**
  * kkphim - Built from src/kkphim/
- * Generated: 2026-09-10T11:22:04.612Z
+ * Generated: 2026-09-10T11:49:17.249Z
  */
 var __defProp = Object.defineProperty;
 var __defProps = Object.defineProperties;
@@ -50,8 +50,6 @@ var CONFIG = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
     Accept: "application/json"
   },
-  // Lọc ad playlist m3u8 (port removeAdsKKphim CloudStream) → data: URI. App phải hỗ trợ data: URI.
-  AD_FILTER: true,
   PROVIDER_NAME: "KKPhim",
   // true  → season lệch thì fallback tìm item "Phần N" khác; cuối cùng ko có → []
   // false → dùng item /tmdb dù lệch season, title ghi "[Phần {N}]" để user tự quyết
@@ -271,54 +269,6 @@ function removeAdsFromPlaylist(playlist, playUrl) {
     changed = true;
   return { playlist: out.join("\n"), changed };
 }
-function pickTopVariant(masterText, masterUrl) {
-  let bw = 0;
-  const variants = [];
-  String(masterText || "").split("\n").forEach((ln) => {
-    const line = ln.trim();
-    if (line.indexOf("#EXT-X-STREAM-INF") === 0) {
-      const m = line.match(/BANDWIDTH=(\d+)/i);
-      bw = m ? Number(m[1]) : 0;
-    } else if (bw > 0 && line && line.charAt(0) !== "#") {
-      variants.push({ url: absolutizeUrl(line, masterUrl), bw });
-      bw = 0;
-    }
-  });
-  variants.sort((a, b) => b.bw - a.bw);
-  return variants.length ? variants[0].url : null;
-}
-function adFilterStream(stream) {
-  return __async(this, null, function* () {
-    if (!/m3u8/i.test(stream.url || ""))
-      return stream;
-    try {
-      let playUrl = stream.url;
-      let text = yield fetchText(playUrl);
-      if (!text || text.indexOf("#EXTM3U") === -1)
-        return stream;
-      if (text.indexOf("#EXT-X-STREAM-INF") !== -1) {
-        playUrl = pickTopVariant(text, playUrl);
-        if (!playUrl)
-          return stream;
-        text = yield fetchText(playUrl);
-        if (!text || text.indexOf("#EXTM3U") === -1)
-          return stream;
-      }
-      const { playlist, changed } = removeAdsFromPlaylist(text, playUrl);
-      if (!changed)
-        return stream;
-      return Object.assign({}, stream, {
-        url: "data:application/vnd.apple.mpegurl;charset=utf-8," + encodeURIComponent(playlist),
-        // App Nuvio sniff MIME theo extension — data: URI không có .m3u8 nên phải
-        // khai báo type="hls" (StreamParser đọc key "type") để chọn HlsMediaSource.
-        type: "hls"
-      });
-    } catch (e) {
-      console.warn(`[KKPhim] ad-filter gi\u1EEF URL g\u1ED1c (${e.message})`);
-      return stream;
-    }
-  });
-}
 function titleSearchFallback(resolved, mediaType, season, episode, options, base) {
   return __async(this, null, function* () {
     const info = yield fetchJson(`${CONFIG.TMDB_API_BASE}/${mediaType}/${resolved}?api_key=${CONFIG.TMDB_API_KEY}`);
@@ -402,12 +352,6 @@ function extractStreams(_0, _1, _2, _3) {
       } catch (e) {
         console.warn(`[KKPhim] ${mediaType} ${resolved}: title fallback l\u1ED7i: ${e.message}`);
       }
-    }
-    if (CONFIG.AD_FILTER && streams.length) {
-      streams = yield Promise.all(streams.map((s) => adFilterStream(s)));
-      const dataUris = streams.filter((s) => (s.url || "").indexOf("data:") === 0).length;
-      if (dataUris)
-        console.warn(`[KKPhim] ad-filter: ${dataUris}/${streams.length} stream ch\u1EE9a ad \u0111\xE3 drop (data: URI).`);
     }
     return streams;
   });
