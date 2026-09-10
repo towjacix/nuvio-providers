@@ -1,6 +1,6 @@
 /**
  * kkphim - Built from src/kkphim/
- * Generated: 2026-09-10T09:58:44.144Z
+ * Generated: 2026-09-10T10:02:01.371Z
  */
 var __defProp = Object.defineProperty;
 var __defProps = Object.defineProperties;
@@ -44,38 +44,16 @@ var __async = (__this, __arguments, generator) => {
 
 // src/kkphim/config.js
 var CONFIG = {
-  // Base URL của KKPhim API (public, GET-only, JSON)
   BASE_URL: "https://phimapi.com",
-  // Nguồn resolve ĐỘNG base URL (cơ chế giống CloudStream KKPhim plugin v15:
-  // TXT trên GitHub chứa domain API hiện hành, chống đổi domain). Có thất bại
-  // thì fallback về BASE_URL hardcode — xem resolveBaseUrl() trong extractor.js.
   DOMAIN_TXT_URL: "https://raw.githubusercontent.com/Datj0000/domain/refs/heads/main/kkphim.txt",
-  // Header mặc định cho mọi request
   HEADERS: {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
     Accept: "application/json"
   },
-  // Tên hiển thị trên stream list
   PROVIDER_NAME: "KKPhim",
-  /**
-   * Strict season matching cho TV shows.
-   * KKPhim's /tmdb/tv/{id} chỉ map tới MỘT entry (season mà họ cập nhật gần nhất),
-   * param ?season= bị bỏ qua (đã verify 2026-09-10: /tmdb/tv/1622 luôn trả Season 10).
-   *
-   * true  → item /tmdb lệch season thì không dùng nó; provider tự fallback
-   *         tìm item "Phần N" khác trên KKPhim qua search theo tên (nếu có).
-   *         Cuối cùng vẫn không có → [].
-   * false → dùng luôn item /tmdb, title ghi rõ "[Phần {N}]" để user tự quyết
-   */
+  // true  → season lệch thì fallback tìm item "Phần N" khác; cuối cùng ko có → []
+  // false → dùng item /tmdb dù lệch season, title ghi "[Phần {N}]" để user tự quyết
   STRICT_SEASON: true,
-  /**
-   * TMDB Find API — resolve IMDB id ("tt...") sang TMDB id số.
-   * App Nuvio truyền IMDB id (từ Stremio catalogs) vào tmdbId, nhưng
-   * phimapi.com chỉ nhận TMDB id số -> 404 (verify 2026-09-10 qua app log:
-   * phimapi.com/tmdb/tv/tt9054364 -> 404, /tmdb/tv/82684 -> status:true).
-   * API key là key công khai dùng chung trong cộng đồng Nuvio providers
-   * (phisher98 AllWish dùng key này, đã verify find/tt9054364 -> 200).
-   */
   TMDB_API_BASE: "https://api.themoviedb.org/3",
   TMDB_API_KEY: "1865f43a0549ca50d341dd9ab8b29f49"
 };
@@ -317,7 +295,7 @@ function toStreams(data, mediaType, season, episode, options = {}) {
   if (mediaType === "tv" && tmdbSeason != null && Number(season) !== tmdbSeason) {
     if (strictSeason) {
       console.warn(
-        `[KKPhim] TV ${movie.tmdb ? movie.tmdb.id : "?"}: y\xEAu c\u1EA7u Season ${season} nh\u01B0ng item /tmdb ch\u1EC9 c\xF3 Season ${tmdbSeason} -> th\u1EED t\xECm item Ph\u1EA7n ${season} theo t\xEAn... (STRICT_SEASON=false s\u1EBD b\u1ECF qua gate v\xE0 d\xE1n nh\xE3n "[Ph\u1EA7n N]")`
+        `[KKPhim] TV ${movie.tmdb ? movie.tmdb.id : "?"}: y\xEAu c\u1EA7u Season ${season} nh\u01B0ng item /tmdb ch\u1EC9 c\xF3 Season ${tmdbSeason} -> th\u1EED t\xECm item Ph\u1EA7n ${season} theo t\xEAn...`
       );
       return [];
     }
