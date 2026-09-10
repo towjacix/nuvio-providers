@@ -1,6 +1,6 @@
 /**
  * kkphim - Built from src/kkphim/
- * Generated: 2026-09-10T10:39:33.143Z
+ * Generated: 2026-09-10T11:22:04.612Z
  */
 var __defProp = Object.defineProperty;
 var __defProps = Object.defineProperties;
@@ -64,31 +64,47 @@ var CONFIG = {
 var TIMEOUT_MS = 15e3;
 function request(_0) {
   return __async(this, arguments, function* (url, options = {}) {
+    const hasTimers = typeof setTimeout === "function" && typeof clearTimeout === "function";
     let controller = null;
-    let signal;
-    if (typeof AbortController !== "undefined") {
-      controller = new AbortController();
-      signal = controller.signal;
+    if (hasTimers) {
+      try {
+        controller = new AbortController();
+      } catch (e) {
+        controller = null;
+      }
     }
-    const timer = setTimeout(() => {
-      if (controller)
-        controller.abort();
-    }, TIMEOUT_MS);
-    let response;
+    let timer = null;
+    if (controller) {
+      timer = setTimeout(() => {
+        try {
+          controller.abort();
+        } catch (e) {
+        }
+      }, TIMEOUT_MS);
+    }
     try {
-      response = yield fetch(url, __spreadProps(__spreadValues({}, options), {
-        headers: __spreadValues(__spreadValues({}, CONFIG.HEADERS), options.headers || {}),
-        signal
-      }));
+      const response = yield fetch(url, __spreadValues(__spreadProps(__spreadValues({}, options), {
+        headers: __spreadValues(__spreadValues({}, CONFIG.HEADERS), options.headers || {})
+      }), controller ? { signal: controller.signal } : {}));
+      if (timer !== null) {
+        try {
+          clearTimeout(timer);
+        } catch (e) {
+        }
+      }
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status} for ${url}`);
+      }
+      return response;
     } catch (e) {
-      clearTimeout(timer);
+      if (timer !== null) {
+        try {
+          clearTimeout(timer);
+        } catch (e2) {
+        }
+      }
       throw new Error(e && e.name === "AbortError" ? `timeout sau ${TIMEOUT_MS}ms` : e && e.message || "fetch error");
     }
-    clearTimeout(timer);
-    if (!response.ok) {
-      throw new Error(`HTTP ${response.status} for ${url}`);
-    }
-    return response;
   });
 }
 function fetchJson(_0) {

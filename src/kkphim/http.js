@@ -2,41 +2,56 @@ import { CONFIG } from './config.js';
 
 const TIMEOUT_MS = 15000;
 
+/**
+ * Fetch với timeout TÙY MÔI TRƯỜNG:
+ * - Node (test/e2e): có setTimeout/clearTimeout → abort sau 15s (tránh treo khi CDN throttle).
+ * - Runtime app Nuvio (quickjs-kt): KHÔNG inject setTimeout → gọi nó = TypeError chết trước
+ *   fetch (lỗi "[] rawLength=2" từng thấy trong log app). Vả lại __native_fetch chạy ĐỒNG BỘ
+ *   (runBlocking) nên timer JS không bao giờ kịp abort — bỏ hẳn timer khi không có sẵn.
+ * Mọi lỗi !ok → throw "HTTP {status} for {url}".
+ */
 async function request(url, options = {}) {
+    const hasTimers = typeof setTimeout === 'function' && typeof clearTimeout === 'function';
     let controller = null;
-    let signal;
-    if (typeof AbortController !== 'undefined') {
-        controller = new AbortController();
-        signal = controller.signal;
+    if (hasTimers) {
+        try {
+            controller = new AbortController();
+        } catch (e) {
+            controller = null;
+        }
     }
 
-    const timer = setTimeout(() => {
-        if (controller) controller.abort();
-    }, TIMEOUT_MS);
+    let timer = null;
+    if (controller) {
+        timer = setTimeout(() => {
+            try { controller.abort(); } catch (e) { /* noop */ }
+        }, TIMEOUT_MS);
+    }
 
-    let response;
     try {
-        response = await fetch(url, {
+        const response = await fetch(url, {
             ...options,
             headers: {
                 ...CONFIG.HEADERS,
                 ...(options.headers || {}),
             },
-            signal,
+            ...(controller ? { signal: controller.signal } : {}),
         });
+        if (timer !== null) {
+            try { clearTimeout(timer); } catch (e) { /* noop */ }
+        }
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status} for ${url}`);
+        }
+        return response;
     } catch (e) {
-        clearTimeout(timer);
+        if (timer !== null) {
+            try { clearTimeout(timer); } catch (e2) { /* noop */ }
+        }
         throw new Error((e && e.name === 'AbortError')
             ? `timeout sau ${TIMEOUT_MS}ms`
             : (e && e.message) || 'fetch error');
     }
-    clearTimeout(timer);
-
-    if (!response.ok) {
-        throw new Error(`HTTP ${response.status} for ${url}`);
-    }
-
-    return response;
 }
 
 export async function fetchJson(url, options = {}) {
