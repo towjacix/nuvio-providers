@@ -203,6 +203,9 @@ export async function adFilterStream(stream) {
         if (!changed) return stream;
         return Object.assign({}, stream, {
             url: 'data:application/vnd.apple.mpegurl;charset=utf-8,' + encodeURIComponent(playlist),
+            // App Nuvio sniff MIME theo extension — data: URI không có .m3u8 nên phải
+            // khai báo type="hls" (StreamParser đọc key "type") để chọn HlsMediaSource.
+            type: 'hls',
         });
     } catch (e) {
         console.warn(`[KKPhim] ad-filter giữ URL gốc (${e.message})`);

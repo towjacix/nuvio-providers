@@ -1,6 +1,6 @@
 /**
  * kkphim - Built from src/kkphim/
- * Generated: 2026-09-10T10:30:49.243Z
+ * Generated: 2026-09-10T10:39:33.143Z
  */
 var __defProp = Object.defineProperty;
 var __defProps = Object.defineProperties;
@@ -292,7 +292,10 @@ function adFilterStream(stream) {
       if (!changed)
         return stream;
       return Object.assign({}, stream, {
-        url: "data:application/vnd.apple.mpegurl;charset=utf-8," + encodeURIComponent(playlist)
+        url: "data:application/vnd.apple.mpegurl;charset=utf-8," + encodeURIComponent(playlist),
+        // App Nuvio sniff MIME theo extension — data: URI không có .m3u8 nên phải
+        // khai báo type="hls" (StreamParser đọc key "type") để chọn HlsMediaSource.
+        type: "hls"
       });
     } catch (e) {
       console.warn(`[KKPhim] ad-filter gi\u1EEF URL g\u1ED1c (${e.message})`);
