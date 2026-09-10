@@ -6,6 +6,11 @@
 export const CONFIG = {
     // Base URL của KKPhim API (public, GET-only, JSON)
     BASE_URL: 'https://phimapi.com',
+    // Nguồn resolve ĐỘNG base URL (cơ chế giống CloudStream KKPhim plugin v15:
+    // TXT trên GitHub chứa domain API hiện hành, chống đổi domain). Có thất bại
+    // thì fallback về BASE_URL hardcode — xem resolveBaseUrl() trong extractor.js.
+    DOMAIN_TXT_URL: 'https://raw.githubusercontent.com/Datj0000/domain/refs/heads/main/kkphim.txt',
+
 
     // Header mặc định cho mọi request
     HEADERS: {

@@ -1,6 +1,6 @@
 /**
  * kkphim - Built from src/kkphim/
- * Generated: 2026-09-10T09:32:17.853Z
+ * Generated: 2026-09-10T09:58:44.144Z
  */
 var __defProp = Object.defineProperty;
 var __defProps = Object.defineProperties;
@@ -46,6 +46,10 @@ var __async = (__this, __arguments, generator) => {
 var CONFIG = {
   // Base URL của KKPhim API (public, GET-only, JSON)
   BASE_URL: "https://phimapi.com",
+  // Nguồn resolve ĐỘNG base URL (cơ chế giống CloudStream KKPhim plugin v15:
+  // TXT trên GitHub chứa domain API hiện hành, chống đổi domain). Có thất bại
+  // thì fallback về BASE_URL hardcode — xem resolveBaseUrl() trong extractor.js.
+  DOMAIN_TXT_URL: "https://raw.githubusercontent.com/Datj0000/domain/refs/heads/main/kkphim.txt",
   // Header mặc định cho mọi request
   HEADERS: {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
@@ -78,7 +82,7 @@ var CONFIG = {
 
 // src/kkphim/http.js
 var TIMEOUT_MS = 15e3;
-function fetchJson(_0) {
+function request(_0) {
   return __async(this, arguments, function* (url, options = {}) {
     let controller = null;
     let signal;
@@ -104,11 +108,57 @@ function fetchJson(_0) {
     if (!response.ok) {
       throw new Error(`HTTP ${response.status} for ${url}`);
     }
+    return response;
+  });
+}
+function fetchJson(_0) {
+  return __async(this, arguments, function* (url, options = {}) {
+    const response = yield request(url, options);
     return yield response.json();
+  });
+}
+function fetchText(_0) {
+  return __async(this, arguments, function* (url, options = {}) {
+    const response = yield request(url, options);
+    return yield response.text();
   });
 }
 
 // src/kkphim/extractor.js
+var cachedBaseUrl = null;
+function normalizeBaseUrl(raw) {
+  const m = String(raw || "").trim().match(/^https?:\/\/[^\s]+/);
+  if (!m)
+    return null;
+  return m[0].replace(/\/+$/, "").replace(/\/v1\/api$/i, "");
+}
+function resolveBaseUrl() {
+  return __async(this, null, function* () {
+    if (cachedBaseUrl)
+      return cachedBaseUrl;
+    let base = null;
+    try {
+      base = normalizeBaseUrl(yield fetchText(CONFIG.DOMAIN_TXT_URL));
+    } catch (e) {
+    }
+    if (!base)
+      base = CONFIG.BASE_URL;
+    if (base === CONFIG.BASE_URL) {
+      cachedBaseUrl = base;
+      return base;
+    }
+    try {
+      yield fetchJson(`${base}/tim-kiem?keyword=phim`);
+      cachedBaseUrl = base;
+    } catch (e) {
+      cachedBaseUrl = CONFIG.BASE_URL;
+    }
+    return cachedBaseUrl;
+  });
+}
+function resetBaseUrlCache() {
+  cachedBaseUrl = null;
+}
 var QUALITY_MAP = {
   FHD: "1080p",
   FULLHD: "1080p",
@@ -144,19 +194,19 @@ function parsePhan(item) {
 function seasonKeyword(name) {
   return String(name || "").replace(/\s*\(Phần\s*\d+\)\s*$/i, "").replace(/\s*\(Season\s*\d+\)\s*$/i, "").trim();
 }
-function searchSeasonFallback(movie, season, episode, options) {
+function searchSeasonFallback(movie, season, episode, options, base) {
   return __async(this, null, function* () {
     const keyword = seasonKeyword(movie && movie.name);
     if (!keyword)
       return [];
-    const search = yield fetchJson(`${CONFIG.BASE_URL}/tim-kiem?keyword=${encodeURIComponent(keyword)}`);
+    const search = yield fetchJson(`${base}/tim-kiem?keyword=${encodeURIComponent(keyword)}`);
     const items = search && search.data && Array.isArray(search.data.items) ? search.data.items : [];
     const want = Number(season);
     for (const it of items.slice(0, 3)) {
       if (!it || typeof it.slug !== "string" || parsePhan(it) !== want)
         continue;
       try {
-        const d = yield fetchJson(`${CONFIG.BASE_URL}/phim/${it.slug}`);
+        const d = yield fetchJson(`${base}/phim/${it.slug}`);
         if (d && d.status === true && parsePhan(d.movie) === want) {
           const s = toStreams(d, "tv", season, episode, options);
           if (s.length)
@@ -168,7 +218,7 @@ function searchSeasonFallback(movie, season, episode, options) {
     return [];
   });
 }
-function titleSearchFallback(resolved, mediaType, season, episode, options) {
+function titleSearchFallback(resolved, mediaType, season, episode, options, base) {
   return __async(this, null, function* () {
     const info = yield fetchJson(`${CONFIG.TMDB_API_BASE}/${mediaType}/${resolved}?api_key=${CONFIG.TMDB_API_KEY}`);
     const name = mediaType === "movie" ? info.title : info.name;
@@ -184,7 +234,7 @@ function titleSearchFallback(resolved, mediaType, season, episode, options) {
     const seen = /* @__PURE__ */ new Set();
     for (const kw of keywords) {
       const kwL = kw.toLowerCase();
-      const search = yield fetchJson(`${CONFIG.BASE_URL}/tim-kiem?keyword=${encodeURIComponent(kw)}`);
+      const search = yield fetchJson(`${base}/tim-kiem?keyword=${encodeURIComponent(kw)}`);
       const items = search && search.data && Array.isArray(search.data.items) ? search.data.items : [];
       const plausible = items.filter((it) => {
         const hay = `${it.name || ""} ${it.origin_name || ""}`.toLowerCase();
@@ -196,7 +246,7 @@ function titleSearchFallback(resolved, mediaType, season, episode, options) {
           continue;
         seen.add(it.slug);
         try {
-          const d = yield fetchJson(`${CONFIG.BASE_URL}/phim/${it.slug}`);
+          const d = yield fetchJson(`${base}/phim/${it.slug}`);
           if (!d || d.status !== true)
             continue;
           const mv = d.movie || {};
@@ -219,13 +269,14 @@ function titleSearchFallback(resolved, mediaType, season, episode, options) {
 function extractStreams(_0, _1, _2, _3) {
   return __async(this, arguments, function* (tmdbId, mediaType, season, episode, options = {}) {
     const resolved = yield resolveTmdbId(tmdbId, mediaType);
+    const base = yield resolveBaseUrl();
     let data = null;
     try {
-      data = yield fetchJson(`${CONFIG.BASE_URL}/tmdb/${mediaType}/${resolved}`);
+      data = yield fetchJson(`${base}/tmdb/${mediaType}/${resolved}`);
     } catch (e) {
       if (!String(e.message).startsWith("HTTP ")) {
         try {
-          data = yield fetchJson(`${CONFIG.BASE_URL}/tmdb/${mediaType}/${resolved}`);
+          data = yield fetchJson(`${base}/tmdb/${mediaType}/${resolved}`);
         } catch (e2) {
         }
       }
@@ -233,7 +284,7 @@ function extractStreams(_0, _1, _2, _3) {
     let streams = toStreams(data, mediaType, season, episode, options);
     if (mediaType === "tv" && streams.length === 0 && data && data.status === true && data.movie) {
       try {
-        streams = yield searchSeasonFallback(data.movie, season, episode, options);
+        streams = yield searchSeasonFallback(data.movie, season, episode, options, base);
         if (streams.length) {
           console.warn(`[KKPhim] TV ${resolved}: fallback theo t\xEAn VN l\u1EA5y \u0111\u01B0\u1EE3c ${streams.length} streams cho Season ${season}.`);
         }
@@ -243,7 +294,7 @@ function extractStreams(_0, _1, _2, _3) {
     }
     if (streams.length === 0 && (!data || data.status !== true || !data.movie)) {
       try {
-        streams = yield titleSearchFallback(resolved, mediaType, season, episode, options);
+        streams = yield titleSearchFallback(resolved, mediaType, season, episode, options, base);
         if (streams.length) {
           console.warn(`[KKPhim] ${mediaType} ${resolved}: kh\xF4ng c\xF3 tag tmdb tr\xEAn KKPhim, t\xECm theo title -> ${streams.length} streams.`);
         }
@@ -336,4 +387,4 @@ function getStreams(tmdbId, mediaType, season, episode, options) {
     }
   });
 }
-module.exports = { getStreams };
+module.exports = { getStreams, resetBaseUrlCache };

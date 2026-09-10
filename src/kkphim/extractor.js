@@ -14,7 +14,56 @@
  */
 
 import { CONFIG } from './config.js';
-import { fetchJson } from './http.js';
+import { fetchJson, fetchText } from './http.js';
+
+// Cache base URL đã resolve (1 lần/session — tránh request TXT mỗi lần getStreams)
+let cachedBaseUrl = null;
+
+/**
+ * Chuẩn hóa text từ domain TXT về base URL root (không có prefix /v1/api —
+ * CloudStream dùng /v1/api cho endpoint kiểu mới, nhưng /tmdb, /phim, /tim-kiem
+ * của provider này là endpoint legacy ở ROOT).
+ */
+export function normalizeBaseUrl(raw) {
+    const m = String(raw || '').trim().match(/^https?:\/\/[^\s]+/);
+    if (!m) return null;
+    return m[0].replace(/\/+$/, '').replace(/\/v1\/api$/i, '');
+}
+
+/**
+ * Resolve base URL động từ TXT (giống CloudStream KKPhim v15). An toàn 3 lớp:
+ * 1) TXT lỗi/treo -> hardcode CONFIG.BASE_URL (hành vi như trước đây)
+ * 2) Base resolve ra khác hardcode -> PROBE 1 request trước khi cache (chống
+ *    domain nhiễm độc/sai), probe lỗi -> quay về hardcode
+ * 3) Base resolve ra đúng hardcode -> dùng luôn, không tốn probe
+ */
+export async function resolveBaseUrl() {
+    if (cachedBaseUrl) return cachedBaseUrl;
+
+    let base = null;
+    try {
+        base = normalizeBaseUrl(await fetchText(CONFIG.DOMAIN_TXT_URL));
+    } catch (e) { /* TXT lỗi -> hardcode */ }
+    if (!base) base = CONFIG.BASE_URL;
+
+    if (base === CONFIG.BASE_URL) {
+        cachedBaseUrl = base;
+        return base;
+    }
+
+    try {
+        await fetchJson(`${base}/tim-kiem?keyword=phim`);
+        cachedBaseUrl = base;
+    } catch (e) {
+        cachedBaseUrl = CONFIG.BASE_URL;
+    }
+    return cachedBaseUrl;
+}
+
+/** Reset cache base URL (chỉ dùng trong test — isolation giữa các test case). */
+export function resetBaseUrlCache() {
+    cachedBaseUrl = null;
+}
 
 const QUALITY_MAP = {
     FHD: '1080p',
@@ -80,18 +129,18 @@ export function seasonKeyword(name) {
  * Khi strict chặn (season lệch) hoặc primary 0 streams: search `/tim-kiem` theo tên
  * VN, filter item khớp Phần N, fetch detail theo slug rồi map như thường.
  */
-export async function searchSeasonFallback(movie, season, episode, options) {
+export async function searchSeasonFallback(movie, season, episode, options, base) {
     const keyword = seasonKeyword(movie && movie.name);
     if (!keyword) return [];
 
-    const search = await fetchJson(`${CONFIG.BASE_URL}/tim-kiem?keyword=${encodeURIComponent(keyword)}`);
+    const search = await fetchJson(`${base}/tim-kiem?keyword=${encodeURIComponent(keyword)}`);
     const items = (search && search.data && Array.isArray(search.data.items)) ? search.data.items : [];
     const want = Number(season);
 
     for (const it of items.slice(0, 3)) {
         if (!it || typeof it.slug !== 'string' || parsePhan(it) !== want) continue;
         try {
-            const d = await fetchJson(`${CONFIG.BASE_URL}/phim/${it.slug}`);
+            const d = await fetchJson(`${base}/phim/${it.slug}`);
             if (d && d.status === true && parsePhan(d.movie) === want) {
                 const s = toStreams(d, 'tv', season, episode, options);
                 if (s.length) return s;
@@ -108,7 +157,8 @@ export async function searchSeasonFallback(movie, season, episode, options) {
  * verify từng candidate bằng tmdb.id khớp (tagged) hoặc origin_name chứa keyword,
  * TV bắt buộc parsePhan == season yêu cầu để tránh lấy nhầm phim cùng keyword.
  */
-export async function titleSearchFallback(resolved, mediaType, season, episode, options) {
+export async function titleSearchFallback(resolved, mediaType, season, episode, options, base) {
+
     const info = await fetchJson(`${CONFIG.TMDB_API_BASE}/${mediaType}/${resolved}?api_key=${CONFIG.TMDB_API_KEY}`);
     const name = mediaType === 'movie' ? info.title : info.name;
     const orig = mediaType === 'movie' ? info.original_title : info.original_name;
@@ -124,7 +174,7 @@ export async function titleSearchFallback(resolved, mediaType, season, episode, 
         // name/origin_name chứa keyword — tránh quét loạt item không liên quan
         // (search keyword phổ biến như "Game of Thrones" trả nhiều phim khác).
         const kwL = kw.toLowerCase();
-        const search = await fetchJson(`${CONFIG.BASE_URL}/tim-kiem?keyword=${encodeURIComponent(kw)}`);
+        const search = await fetchJson(`${base}/tim-kiem?keyword=${encodeURIComponent(kw)}`);
         const items = (search && search.data && Array.isArray(search.data.items)) ? search.data.items : [];
         const plausible = items.filter((it) => {
             const hay = `${it.name || ''} ${it.origin_name || ''}`.toLowerCase();
@@ -138,7 +188,7 @@ export async function titleSearchFallback(resolved, mediaType, season, episode, 
             if (seen.has(it.slug)) continue;
             seen.add(it.slug);
             try {
-                const d = await fetchJson(`${CONFIG.BASE_URL}/phim/${it.slug}`);
+                const d = await fetchJson(`${base}/phim/${it.slug}`);
                 if (!d || d.status !== true) continue;
                 const mv = d.movie || {};
                 const exact = String((mv.tmdb && mv.tmdb.id) || '') === String(resolved);
@@ -165,17 +215,18 @@ export async function titleSearchFallback(resolved, mediaType, season, episode, 
  */
 export async function extractStreams(tmdbId, mediaType, season, episode, options = {}) {
     const resolved = await resolveTmdbId(tmdbId, mediaType);
+    const base = await resolveBaseUrl();
 
     // /tmdb/{type}/{id} trả 404 khi KKPhim không gắn tag tmdb -> fetchJson throw.
     // Retry 1 lần cho timeout/network (phimapi chậm giờ cao điểm); HTTP lỗi xác định
     // (404) thì không retry — chuyển thẳng title fallback.
     let data = null;
     try {
-        data = await fetchJson(`${CONFIG.BASE_URL}/tmdb/${mediaType}/${resolved}`);
+        data = await fetchJson(`${base}/tmdb/${mediaType}/${resolved}`);
     } catch (e) {
         if (!String(e.message).startsWith('HTTP ')) {
             try {
-                data = await fetchJson(`${CONFIG.BASE_URL}/tmdb/${mediaType}/${resolved}`);
+                data = await fetchJson(`${base}/tmdb/${mediaType}/${resolved}`);
             } catch (e2) { /* bỏ qua -> title fallback */ }
         }
     }
@@ -185,7 +236,7 @@ export async function extractStreams(tmdbId, mediaType, season, episode, options
     // 1) TV + primary không ra gì: tìm item "Phần N" cùng phim qua search tên VN
     if (mediaType === 'tv' && streams.length === 0 && data && data.status === true && data.movie) {
         try {
-            streams = await searchSeasonFallback(data.movie, season, episode, options);
+            streams = await searchSeasonFallback(data.movie, season, episode, options, base);
             if (streams.length) {
                 console.warn(`[KKPhim] TV ${resolved}: fallback theo tên VN lấy được ${streams.length} streams cho Season ${season}.`);
             }
@@ -197,7 +248,7 @@ export async function extractStreams(tmdbId, mediaType, season, episode, options
     // 2) Vẫn 0 và KKPhim không có entry tmdb: tìm theo title EN qua TMDB API
     if (streams.length === 0 && (!data || data.status !== true || !data.movie)) {
         try {
-            streams = await titleSearchFallback(resolved, mediaType, season, episode, options);
+            streams = await titleSearchFallback(resolved, mediaType, season, episode, options, base);
             if (streams.length) {
                 console.warn(`[KKPhim] ${mediaType} ${resolved}: không có tag tmdb trên KKPhim, tìm theo title -> ${streams.length} streams.`);
             }

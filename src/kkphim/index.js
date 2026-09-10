@@ -8,6 +8,7 @@
  */
 
 import { extractStreams } from './extractor.js';
+import { resetBaseUrlCache } from './extractor.js';
 
 /**
  * Main function called by Nuvio
@@ -26,4 +27,6 @@ async function getStreams(tmdbId, mediaType, season, episode, options) {
     }
 }
 
-module.exports = { getStreams };
+// Chỉ dùng trong unit test: reset cache base URL động (isolation giữa các test case)
+module.exports = { getStreams, resetBaseUrlCache };
+
