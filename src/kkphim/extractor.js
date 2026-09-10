@@ -24,6 +24,29 @@ const QUALITY_MAP = {
     CAM: 'CAM',
 };
 
+
+const IMDB_ID_RE = /^tt\d+$/i;
+
+/**
+ * Resolve ID về dạng số TMDB mà phimapi.com yêu cầu.
+ * - Số nguyên ("12345") -> giữ nguyên (không tốn request)
+ * - IMDB id ("tt9054364") -> TMDB Find API (external_source=imdb_id)
+ * App Nuvio (Stremio catalogs) truyền IMDB id dạng "tt..." — phimapi.com
+ * trả 404 cho dạng này (verify 2026-09-10: /tmdb/tv/tt9054364 -> 404).
+ * Không resolve được thì throw (getStreams bắt -> []).
+ */
+export async function resolveTmdbId(tmdbId, mediaType) {
+    const raw = String(tmdbId || '').split(':')[0].trim();
+    if (/^\d+$/.test(raw)) return raw;
+    if (!IMDB_ID_RE.test(raw)) throw new Error(`id không hợp lệ: "${raw}"`);
+
+    const url = `${CONFIG.TMDB_API_BASE}/find/${raw}?api_key=${CONFIG.TMDB_API_KEY}&external_source=imdb_id`;
+    const data = await fetchJson(url);
+    const results = mediaType === 'movie' ? data.movie_results : data.tv_results;
+    const id = Array.isArray(results) && results[0] && results[0].id;
+    if (!id) throw new Error(`không resolve được TMDB id từ "${raw}"`);
+    return String(id);
+}
 /**
  * Entry point: fetch chi tiết phim theo TMDB ID rồi map sang streams.
  * @param {string} tmdbId
@@ -34,7 +57,8 @@ const QUALITY_MAP = {
  * @returns {Promise<Array>}
  */
 export async function extractStreams(tmdbId, mediaType, season, episode, options = {}) {
-    const url = `${CONFIG.BASE_URL}/tmdb/${mediaType}/${tmdbId}`;
+    const resolved = await resolveTmdbId(tmdbId, mediaType);
+    const url = `${CONFIG.BASE_URL}/tmdb/${mediaType}/${resolved}`;
     const data = await fetchJson(url);
     return toStreams(data, mediaType, season, episode, options);
 }

@@ -25,4 +25,15 @@ export const CONFIG = {
      * false → vẫn trả stream nhưng title ghi rõ "[Phần {N}]" để user tự quyết
      */
     STRICT_SEASON: true,
+
+    /**
+     * TMDB Find API — resolve IMDB id ("tt...") sang TMDB id số.
+     * App Nuvio truyền IMDB id (từ Stremio catalogs) vào tmdbId, nhưng
+     * phimapi.com chỉ nhận TMDB id số -> 404 (verify 2026-09-10 qua app log:
+     * phimapi.com/tmdb/tv/tt9054364 -> 404, /tmdb/tv/82684 -> status:true).
+     * API key là key công khai dùng chung trong cộng đồng Nuvio providers
+     * (phisher98 AllWish dùng key này, đã verify find/tt9054364 -> 200).
+     */
+    TMDB_API_BASE: 'https://api.themoviedb.org/3',
+    TMDB_API_KEY: '1865f43a0549ca50d341dd9ab8b29f49',
 };

@@ -1,6 +1,6 @@
 /**
  * kkphim - Built from src/kkphim/
- * Generated: 2026-09-10T08:21:10.302Z
+ * Generated: 2026-09-10T08:42:26.447Z
  */
 var __defProp = Object.defineProperty;
 var __defProps = Object.defineProperties;
@@ -61,7 +61,17 @@ var CONFIG = {
    * true  → season không khớp thì trả [] (chính xác nội dung)
    * false → vẫn trả stream nhưng title ghi rõ "[Phần {N}]" để user tự quyết
    */
-  STRICT_SEASON: true
+  STRICT_SEASON: true,
+  /**
+   * TMDB Find API — resolve IMDB id ("tt...") sang TMDB id số.
+   * App Nuvio truyền IMDB id (từ Stremio catalogs) vào tmdbId, nhưng
+   * phimapi.com chỉ nhận TMDB id số -> 404 (verify 2026-09-10 qua app log:
+   * phimapi.com/tmdb/tv/tt9054364 -> 404, /tmdb/tv/82684 -> status:true).
+   * API key là key công khai dùng chung trong cộng đồng Nuvio providers
+   * (phisher98 AllWish dùng key này, đã verify find/tt9054364 -> 200).
+   */
+  TMDB_API_BASE: "https://api.themoviedb.org/3",
+  TMDB_API_KEY: "1865f43a0549ca50d341dd9ab8b29f49"
 };
 
 // src/kkphim/http.js
@@ -85,9 +95,27 @@ var QUALITY_MAP = {
   SD: "480p",
   CAM: "CAM"
 };
+var IMDB_ID_RE = /^tt\d+$/i;
+function resolveTmdbId(tmdbId, mediaType) {
+  return __async(this, null, function* () {
+    const raw = String(tmdbId || "").split(":")[0].trim();
+    if (/^\d+$/.test(raw))
+      return raw;
+    if (!IMDB_ID_RE.test(raw))
+      throw new Error(`id kh\xF4ng h\u1EE3p l\u1EC7: "${raw}"`);
+    const url = `${CONFIG.TMDB_API_BASE}/find/${raw}?api_key=${CONFIG.TMDB_API_KEY}&external_source=imdb_id`;
+    const data = yield fetchJson(url);
+    const results = mediaType === "movie" ? data.movie_results : data.tv_results;
+    const id = Array.isArray(results) && results[0] && results[0].id;
+    if (!id)
+      throw new Error(`kh\xF4ng resolve \u0111\u01B0\u1EE3c TMDB id t\u1EEB "${raw}"`);
+    return String(id);
+  });
+}
 function extractStreams(_0, _1, _2, _3) {
   return __async(this, arguments, function* (tmdbId, mediaType, season, episode, options = {}) {
-    const url = `${CONFIG.BASE_URL}/tmdb/${mediaType}/${tmdbId}`;
+    const resolved = yield resolveTmdbId(tmdbId, mediaType);
+    const url = `${CONFIG.BASE_URL}/tmdb/${mediaType}/${resolved}`;
     const data = yield fetchJson(url);
     return toStreams(data, mediaType, season, episode, options);
   });
