@@ -307,8 +307,16 @@ export function toStreams(data, mediaType, season, episode, options = {}) {
                 title: buildTitle(ep, server, isMovie ? null : labelFor(tmdbSeason, season, strictSeason)),
                 url,
                 quality: parseQuality(ep.filename, movie.quality),
+                // headers phòng hờ: plugin runtime chỉ giữ item["headers"] top-level →
+                // player mang UA/Accept khi CDN bật chặn non-browser. KHÔNG thêm
+                // Referer/Origin (sai host có thể khiến CDN đang chạy tốt trả 403).
+                headers: {
+                    'User-Agent': CONFIG.HEADERS['User-Agent'],
+                    Accept: '*/*',
+                },
             });
-        });
+    });
+
     });
     if (!isMovie && streams.length === 0) {
         console.warn(`[KKPhim] TV ${movie.tmdb ? movie.tmdb.id : '?'}: không có stream cho S${season}E${episode} (KKPhim đang giữ S${tmdbSeason ?? '?'}).`);

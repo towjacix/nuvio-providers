@@ -1,6 +1,6 @@
 /**
  * kkphim - Built from src/kkphim/
- * Generated: 2026-09-10T11:49:17.249Z
+ * Generated: 2026-09-10T12:31:19.594Z
  */
 var __defProp = Object.defineProperty;
 var __defProps = Object.defineProperties;
@@ -394,7 +394,14 @@ function toStreams(data, mediaType, season, episode, options = {}) {
         name: CONFIG.PROVIDER_NAME,
         title: buildTitle(ep, server, isMovie ? null : labelFor(tmdbSeason, season, strictSeason)),
         url,
-        quality: parseQuality(ep.filename, movie.quality)
+        quality: parseQuality(ep.filename, movie.quality),
+        // headers phòng hờ: plugin runtime chỉ giữ item["headers"] top-level →
+        // player mang UA/Accept khi CDN bật chặn non-browser. KHÔNG thêm
+        // Referer/Origin (sai host có thể khiến CDN đang chạy tốt trả 403).
+        headers: {
+          "User-Agent": CONFIG.HEADERS["User-Agent"],
+          Accept: "*/*"
+        }
       });
     });
   });
