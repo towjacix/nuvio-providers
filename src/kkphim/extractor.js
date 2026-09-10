@@ -47,6 +47,59 @@ export async function resolveTmdbId(tmdbId, mediaType) {
     if (!id) throw new Error(`không resolve được TMDB id từ "${raw}"`);
     return String(id);
 }
+
+const PHAN_NAME_RE = /\(Phần\s*(\d+)\)/i;
+const PHAN_SLUG_RE = /-phan-(\d+)$/i;
+
+/**
+ * Đọc số "Phần" từ tên/slug kiểu KKPhim: "Dược Sư Tự Sự (Phần 1)",
+ * "...-phan-1". Không có marker => Phần 1.
+ */
+export function parsePhan(item) {
+    const name = (item && item.name) || '';
+    const slug = (item && item.slug) || '';
+    const m = PHAN_NAME_RE.exec(name) || PHAN_SLUG_RE.exec(slug);
+    return m ? Number(m[1]) : 1;
+}
+
+/**
+ * Biến movie.name ("Dược Sư Tự Sự (Phần 2)") thành keyword tìm kiếm
+ * ("Dược Sư Tự Sự") — bỏ marker Phần/Season ở cuối.
+ */
+export function seasonKeyword(name) {
+    return String(name || '')
+        .replace(/\s*\(Phần\s*\d+\)\s*$/i, '')
+        .replace(/\s*\(Season\s*\d+\)\s*$/i, '')
+        .trim();
+}
+
+/**
+ * Fallback cho TV: /tmdb/tv/{id} chỉ trỏ tới MỘT item (season mới nhất mà KKPhim
+ * gắn TMDB id — các phần khác có slug riêng như "duoc-su-tu-su-phan-1" và KHÔNG có
+ * tmdb mapping, verify live 2026-09-10 qua /phim/duoc-su-tu-su-phan-1).
+ * Khi strict chặn (season lệch) hoặc primary 0 streams: search `/tim-kiem` theo tên
+ * VN, filter item khớp Phần N, fetch detail theo slug rồi map như thường.
+ */
+export async function searchSeasonFallback(movie, season, episode, options) {
+    const keyword = seasonKeyword(movie && movie.name);
+    if (!keyword) return [];
+
+    const search = await fetchJson(`${CONFIG.BASE_URL}/tim-kiem?keyword=${encodeURIComponent(keyword)}`);
+    const items = (search && search.data && Array.isArray(search.data.items)) ? search.data.items : [];
+    const want = Number(season);
+
+    for (const it of items.slice(0, 5)) {
+        if (!it || typeof it.slug !== 'string' || parsePhan(it) !== want) continue;
+        try {
+            const d = await fetchJson(`${CONFIG.BASE_URL}/phim/${it.slug}`);
+            if (d && d.status === true && parsePhan(d.movie) === want) {
+                const s = toStreams(d, 'tv', season, episode, options);
+                if (s.length) return s;
+            }
+        } catch (e) { /* skip item lỗi */ }
+    }
+    return [];
+}
 /**
  * Entry point: fetch chi tiết phim theo TMDB ID rồi map sang streams.
  * @param {string} tmdbId
@@ -60,7 +113,21 @@ export async function extractStreams(tmdbId, mediaType, season, episode, options
     const resolved = await resolveTmdbId(tmdbId, mediaType);
     const url = `${CONFIG.BASE_URL}/tmdb/${mediaType}/${resolved}`;
     const data = await fetchJson(url);
-    return toStreams(data, mediaType, season, episode, options);
+
+    let streams = toStreams(data, mediaType, season, episode, options);
+
+    // TV + primary không ra gì -> thử tìm item season khác theo tên trên KKPhim
+    if (mediaType === 'tv' && streams.length === 0 && data && data.status === true && data.movie) {
+        try {
+            streams = await searchSeasonFallback(data.movie, season, episode, options);
+            if (streams.length) {
+                console.warn(`[KKPhim] TV ${resolved}: fallback theo tên lấy được ${streams.length} streams cho Season ${season}.`);
+            }
+        } catch (e) {
+            console.warn(`[KKPhim] TV ${resolved}: fallback search lỗi: ${e.message}`);
+        }
+    }
+    return streams;
 }
 
 /**
@@ -86,8 +153,8 @@ export function toStreams(data, mediaType, season, episode, options = {}) {
         if (strictSeason) {
             console.warn(
                 `[KKPhim] TV ${movie.tmdb ? movie.tmdb.id : '?'}: yêu cầu Season ${season} ` +
-                `nhưng KKPhim chỉ có Season ${tmdbSeason} -> [] (strict). ` +
-                `Chọn đúng season trong app, hoặc STRICT_SEASON=false để lấy stream kèm nhãn "[Phần N]".`
+                `nhưng item /tmdb chỉ có Season ${tmdbSeason} -> thử tìm item Phần ${season} theo tên... ` +
+                `(STRICT_SEASON=false sẽ bỏ qua gate và dán nhãn "[Phần N]")`
             );
             return [];
         }

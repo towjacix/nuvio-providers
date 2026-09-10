@@ -1,6 +1,6 @@
 /**
  * kkphim - Built from src/kkphim/
- * Generated: 2026-09-10T08:52:44.294Z
+ * Generated: 2026-09-10T09:00:44.169Z
  */
 var __defProp = Object.defineProperty;
 var __defProps = Object.defineProperties;
@@ -58,8 +58,10 @@ var CONFIG = {
    * KKPhim's /tmdb/tv/{id} chỉ map tới MỘT entry (season mà họ cập nhật gần nhất),
    * param ?season= bị bỏ qua (đã verify 2026-09-10: /tmdb/tv/1622 luôn trả Season 10).
    *
-   * true  → season không khớp thì trả [] (chính xác nội dung)
-   * false → vẫn trả stream nhưng title ghi rõ "[Phần {N}]" để user tự quyết
+   * true  → item /tmdb lệch season thì không dùng nó; provider tự fallback
+   *         tìm item "Phần N" khác trên KKPhim qua search theo tên (nếu có).
+   *         Cuối cùng vẫn không có → [].
+   * false → dùng luôn item /tmdb, title ghi rõ "[Phần {N}]" để user tự quyết
    */
   STRICT_SEASON: true,
   /**
@@ -112,12 +114,58 @@ function resolveTmdbId(tmdbId, mediaType) {
     return String(id);
   });
 }
+var PHAN_NAME_RE = /\(Phần\s*(\d+)\)/i;
+var PHAN_SLUG_RE = /-phan-(\d+)$/i;
+function parsePhan(item) {
+  const name = item && item.name || "";
+  const slug = item && item.slug || "";
+  const m = PHAN_NAME_RE.exec(name) || PHAN_SLUG_RE.exec(slug);
+  return m ? Number(m[1]) : 1;
+}
+function seasonKeyword(name) {
+  return String(name || "").replace(/\s*\(Phần\s*\d+\)\s*$/i, "").replace(/\s*\(Season\s*\d+\)\s*$/i, "").trim();
+}
+function searchSeasonFallback(movie, season, episode, options) {
+  return __async(this, null, function* () {
+    const keyword = seasonKeyword(movie && movie.name);
+    if (!keyword)
+      return [];
+    const search = yield fetchJson(`${CONFIG.BASE_URL}/tim-kiem?keyword=${encodeURIComponent(keyword)}`);
+    const items = search && search.data && Array.isArray(search.data.items) ? search.data.items : [];
+    const want = Number(season);
+    for (const it of items.slice(0, 5)) {
+      if (!it || typeof it.slug !== "string" || parsePhan(it) !== want)
+        continue;
+      try {
+        const d = yield fetchJson(`${CONFIG.BASE_URL}/phim/${it.slug}`);
+        if (d && d.status === true && parsePhan(d.movie) === want) {
+          const s = toStreams(d, "tv", season, episode, options);
+          if (s.length)
+            return s;
+        }
+      } catch (e) {
+      }
+    }
+    return [];
+  });
+}
 function extractStreams(_0, _1, _2, _3) {
   return __async(this, arguments, function* (tmdbId, mediaType, season, episode, options = {}) {
     const resolved = yield resolveTmdbId(tmdbId, mediaType);
     const url = `${CONFIG.BASE_URL}/tmdb/${mediaType}/${resolved}`;
     const data = yield fetchJson(url);
-    return toStreams(data, mediaType, season, episode, options);
+    let streams = toStreams(data, mediaType, season, episode, options);
+    if (mediaType === "tv" && streams.length === 0 && data && data.status === true && data.movie) {
+      try {
+        streams = yield searchSeasonFallback(data.movie, season, episode, options);
+        if (streams.length) {
+          console.warn(`[KKPhim] TV ${resolved}: fallback theo t\xEAn l\u1EA5y \u0111\u01B0\u1EE3c ${streams.length} streams cho Season ${season}.`);
+        }
+      } catch (e) {
+        console.warn(`[KKPhim] TV ${resolved}: fallback search l\u1ED7i: ${e.message}`);
+      }
+    }
+    return streams;
   });
 }
 function toStreams(data, mediaType, season, episode, options = {}) {
@@ -132,7 +180,7 @@ function toStreams(data, mediaType, season, episode, options = {}) {
   if (mediaType === "tv" && tmdbSeason != null && Number(season) !== tmdbSeason) {
     if (strictSeason) {
       console.warn(
-        `[KKPhim] TV ${movie.tmdb ? movie.tmdb.id : "?"}: y\xEAu c\u1EA7u Season ${season} nh\u01B0ng KKPhim ch\u1EC9 c\xF3 Season ${tmdbSeason} -> [] (strict). Ch\u1ECDn \u0111\xFAng season trong app, ho\u1EB7c STRICT_SEASON=false \u0111\u1EC3 l\u1EA5y stream k\xE8m nh\xE3n "[Ph\u1EA7n N]".`
+        `[KKPhim] TV ${movie.tmdb ? movie.tmdb.id : "?"}: y\xEAu c\u1EA7u Season ${season} nh\u01B0ng item /tmdb ch\u1EC9 c\xF3 Season ${tmdbSeason} -> th\u1EED t\xECm item Ph\u1EA7n ${season} theo t\xEAn... (STRICT_SEASON=false s\u1EBD b\u1ECF qua gate v\xE0 d\xE1n nh\xE3n "[Ph\u1EA7n N]")`
       );
       return [];
     }

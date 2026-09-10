@@ -21,8 +21,10 @@ export const CONFIG = {
      * KKPhim's /tmdb/tv/{id} chỉ map tới MỘT entry (season mà họ cập nhật gần nhất),
      * param ?season= bị bỏ qua (đã verify 2026-09-10: /tmdb/tv/1622 luôn trả Season 10).
      *
-     * true  → season không khớp thì trả [] (chính xác nội dung)
-     * false → vẫn trả stream nhưng title ghi rõ "[Phần {N}]" để user tự quyết
+     * true  → item /tmdb lệch season thì không dùng nó; provider tự fallback
+     *         tìm item "Phần N" khác trên KKPhim qua search theo tên (nếu có).
+     *         Cuối cùng vẫn không có → [].
+     * false → dùng luôn item /tmdb, title ghi rõ "[Phần {N}]" để user tự quyết
      */
     STRICT_SEASON: true,
 
