@@ -62,6 +62,27 @@
       "contentLanguage": [
         "vi"
       ]
+    },
+    {
+      "id": "vidking",
+      "name": "VidKing (EN/Vietsub)",
+      "description": "Nguồn phim Anh đa ngôn ngữ (backend SpeedRacelight/Cineby-VidKing). Catalog TMDB đầy đủ kể cả phim ít nổi, chất lượng tới 2160p, sub nhiều ngôn ngữ (Anh, Việt, ...).",
+      "version": "1.0.0",
+      "author": "towjacix",
+      "supportedTypes": [
+        "movie",
+        "tv"
+      ],
+      "filename": "providers/vidking.js",
+      "enabled": true,
+      "formats": [
+        "m3u8"
+      ],
+      "logo": "https://www.google.com/s2/favicons?domain=vidking.net&sz=128",
+      "contentLanguage": [
+        "en",
+        "vi"
+      ]
     }
   ]
 }
