@@ -29,18 +29,38 @@ async function fetchSeed(mediaId) {
  */
 export async function tmdbMeta(tmdbId, mediaType) {
     const type = mediaType === 'tv' ? 'tv' : 'movie';
-    const url = `${CONFIG.TMDB_API_BASE}/${type}/${encodeURIComponent(String(tmdbId))}`
-        + `?api_key=${CONFIG.TMDB_API_KEY}&append_to_response=external_ids`;
-    const info = await fetchJson(url);
+    const rawId = String(tmdbId || '').trim();
+    const isImdb = /^tt\d+$/i.test(rawId);
+
+    let info;
+    if (isImdb) {
+        // IMDB ID → resolve qua TMDB /3/find/ (giống nguonc/kkphim)
+        const find = await fetchJson(
+            `${CONFIG.TMDB_API_BASE}/find/${encodeURIComponent(rawId)}?external_source=imdb_id&api_key=${CONFIG.TMDB_API_KEY}`,
+        );
+        const list = type === 'tv' ? (find.tv_results || []) : (find.movie_results || []);
+        info = list[0];
+        if (!info) {
+            console.warn(`[VidKing] TMDB find không có kết quả cho IMDB ${rawId}`);
+            return { title: '', year: '', imdbId: rawId };
+        }
+    } else {
+        info = await fetchJson(
+            `${CONFIG.TMDB_API_BASE}/${type}/${encodeURIComponent(rawId)}`
+            + `?api_key=${CONFIG.TMDB_API_KEY}&append_to_response=external_ids`,
+        );
+    }
+
+    const tmdbNumericId = info.id ? Number(info.id) : 0;
     const title = type === 'movie' ? (info.title || info.original_title) : (info.name || info.original_name);
     const date = type === 'movie' ? info.release_date : info.first_air_date;
     const year = date ? String(date).slice(0, 4) : '';
-    const ex = info.external_ids || {};
-    const imdbId = typeof ex.imdb_id === 'string' ? ex.imdb_id : '';
+    const imdbId = isImdb ? rawId : String((info.external_ids || {}).imdb_id || '');
     return {
         title: title ? String(title) : '',
         year,
         imdbId,
+        tmdbNumericId,
     };
 }
 
@@ -156,22 +176,25 @@ export async function extractStreams(tmdbId, mediaType, season, episode) {
         console.warn(`[VidKing] TMDB không có title cho ${mediaType} ${tmdbId}`);
         return [];
     }
-    meta.tmdbId = tmdbId;
+    // tmdbNumericId: TMDB int ID thực (resolve từ IMDB nếu cần — seed/sources phải dùng số, không phải "tt...")
+    const numericId = meta.tmdbNumericId || tmdbId;
+    meta.tmdbId = numericId;
 
-    const seed = await fetchSeed(tmdbId);
+    const seed = await fetchSeed(numericId);
     const url = buildSourcesUrl(meta, mediaType, season, episode, seed);
 
     let payload = null;
     try {
         const text = await fetchText(url);
-        payload = decryptPayload(text, seed, tmdbId);
+        payload = decryptPayload(text, seed, numericId);
     } catch (e) {
         // seed-invalid (TTL 30s) hoặc bad payload → thử lại 1 lần với seed mới
         if (/decrypt failed|seed/.test(String(e && e.message))) {
             seedCache = { value: null, at: 0 };
-            const seed2 = await fetchSeed(tmdbId);
+            const seed2 = await fetchSeed(numericId);
             const text2 = await fetchText(buildSourcesUrl(meta, mediaType, season, episode, seed2));
-            payload = decryptPayload(text2, seed2, tmdbId);
+            payload = decryptPayload(text2, seed2, numericId);
+            // retry thành công → KHÔNG throw
         } else {
             throw e;
         }
