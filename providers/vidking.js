@@ -1,6 +1,6 @@
 /**
  * vidking - Built from src/vidking/
- * Generated: 2026-09-10T14:24:56.467Z
+ * Generated: 2026-09-10T14:29:02.128Z
  */
 var __defProp = Object.defineProperty;
 var __defProps = Object.defineProperties;
@@ -445,7 +445,7 @@ function toStreamItems(payload, meta) {
       url: s.url,
       quality: quality && quality !== "Auto" ? quality : void 0,
       type: "hls",
-      headers: {}
+      headers: CONFIG.REFERER ? { Referer: CONFIG.REFERER } : {}
     }, subs.length ? { subtitles: subs } : {}));
   }
   return items;

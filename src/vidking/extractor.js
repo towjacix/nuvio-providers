@@ -155,7 +155,7 @@ export function toStreamItems(payload, meta) {
             url: s.url,
             quality: (quality && quality !== 'Auto') ? quality : undefined,
             type: 'hls',
-            headers: {}, // segment public — không cần headers chơi
+            headers: CONFIG.REFERER ? { Referer: CONFIG.REFERER } : {}, // variant/segment cần Referer (403 nếu thiếu)
             ...(subs.length ? { subtitles: subs } : {}),
         });
     }
