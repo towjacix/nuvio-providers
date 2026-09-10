@@ -1,6 +1,6 @@
 /**
  * vidking - Built from src/vidking/
- * Generated: 2026-09-10T13:55:20.609Z
+ * Generated: 2026-09-10T14:17:35.791Z
  */
 var __defProp = Object.defineProperty;
 var __defProps = Object.defineProperties;
@@ -323,17 +323,34 @@ function fetchSeed(mediaId) {
 function tmdbMeta(tmdbId, mediaType) {
   return __async(this, null, function* () {
     const type = mediaType === "tv" ? "tv" : "movie";
-    const url = `${CONFIG.TMDB_API_BASE}/${type}/${encodeURIComponent(String(tmdbId))}?api_key=${CONFIG.TMDB_API_KEY}&append_to_response=external_ids`;
-    const info = yield fetchJson(url);
+    const rawId = String(tmdbId || "").trim();
+    const isImdb = /^tt\d+$/i.test(rawId);
+    let info;
+    if (isImdb) {
+      const find = yield fetchJson(
+        `${CONFIG.TMDB_API_BASE}/find/${encodeURIComponent(rawId)}?external_source=imdb_id&api_key=${CONFIG.TMDB_API_KEY}`
+      );
+      const list = type === "tv" ? find.tv_results || [] : find.movie_results || [];
+      info = list[0];
+      if (!info) {
+        console.warn(`[VidKing] TMDB find kh\xF4ng c\xF3 k\u1EBFt qu\u1EA3 cho IMDB ${rawId}`);
+        return { title: "", year: "", imdbId: rawId };
+      }
+    } else {
+      info = yield fetchJson(
+        `${CONFIG.TMDB_API_BASE}/${type}/${encodeURIComponent(rawId)}?api_key=${CONFIG.TMDB_API_KEY}&append_to_response=external_ids`
+      );
+    }
+    const tmdbNumericId = info.id ? Number(info.id) : 0;
     const title = type === "movie" ? info.title || info.original_title : info.name || info.original_name;
     const date = type === "movie" ? info.release_date : info.first_air_date;
     const year = date ? String(date).slice(0, 4) : "";
-    const ex = info.external_ids || {};
-    const imdbId = typeof ex.imdb_id === "string" ? ex.imdb_id : "";
+    const imdbId = isImdb ? rawId : String((info.external_ids || {}).imdb_id || "");
     return {
       title: title ? String(title) : "",
       year,
-      imdbId
+      imdbId,
+      tmdbNumericId
     };
   });
 }
@@ -445,19 +462,20 @@ function extractStreams(tmdbId, mediaType, season, episode) {
       console.warn(`[VidKing] TMDB kh\xF4ng c\xF3 title cho ${mediaType} ${tmdbId}`);
       return [];
     }
-    meta.tmdbId = tmdbId;
-    const seed = yield fetchSeed(tmdbId);
+    const numericId = meta.tmdbNumericId || tmdbId;
+    meta.tmdbId = numericId;
+    const seed = yield fetchSeed(numericId);
     const url = buildSourcesUrl(meta, mediaType, season, episode, seed);
     let payload = null;
     try {
       const text = yield fetchText(url);
-      payload = decryptPayload(text, seed, tmdbId);
+      payload = decryptPayload(text, seed, numericId);
     } catch (e) {
       if (/decrypt failed|seed/.test(String(e && e.message))) {
         seedCache = { value: null, at: 0 };
-        const seed2 = yield fetchSeed(tmdbId);
+        const seed2 = yield fetchSeed(numericId);
         const text2 = yield fetchText(buildSourcesUrl(meta, mediaType, season, episode, seed2));
-        payload = decryptPayload(text2, seed2, tmdbId);
+        payload = decryptPayload(text2, seed2, numericId);
       } else {
         throw e;
       }
