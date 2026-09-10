@@ -1,6 +1,6 @@
 /**
  * kkphim - Built from src/kkphim/
- * Generated: 2026-09-10T09:00:44.169Z
+ * Generated: 2026-09-10T09:32:17.853Z
  */
 var __defProp = Object.defineProperty;
 var __defProps = Object.defineProperties;
@@ -77,11 +77,30 @@ var CONFIG = {
 };
 
 // src/kkphim/http.js
+var TIMEOUT_MS = 15e3;
 function fetchJson(_0) {
   return __async(this, arguments, function* (url, options = {}) {
-    const response = yield fetch(url, __spreadProps(__spreadValues({}, options), {
-      headers: __spreadValues(__spreadValues({}, CONFIG.HEADERS), options.headers || {})
-    }));
+    let controller = null;
+    let signal;
+    if (typeof AbortController !== "undefined") {
+      controller = new AbortController();
+      signal = controller.signal;
+    }
+    const timer = setTimeout(() => {
+      if (controller)
+        controller.abort();
+    }, TIMEOUT_MS);
+    let response;
+    try {
+      response = yield fetch(url, __spreadProps(__spreadValues({}, options), {
+        headers: __spreadValues(__spreadValues({}, CONFIG.HEADERS), options.headers || {}),
+        signal
+      }));
+    } catch (e) {
+      clearTimeout(timer);
+      throw new Error(e && e.name === "AbortError" ? `timeout sau ${TIMEOUT_MS}ms` : e && e.message || "fetch error");
+    }
+    clearTimeout(timer);
     if (!response.ok) {
       throw new Error(`HTTP ${response.status} for ${url}`);
     }
@@ -133,7 +152,7 @@ function searchSeasonFallback(movie, season, episode, options) {
     const search = yield fetchJson(`${CONFIG.BASE_URL}/tim-kiem?keyword=${encodeURIComponent(keyword)}`);
     const items = search && search.data && Array.isArray(search.data.items) ? search.data.items : [];
     const want = Number(season);
-    for (const it of items.slice(0, 5)) {
+    for (const it of items.slice(0, 3)) {
       if (!it || typeof it.slug !== "string" || parsePhan(it) !== want)
         continue;
       try {
@@ -149,20 +168,87 @@ function searchSeasonFallback(movie, season, episode, options) {
     return [];
   });
 }
+function titleSearchFallback(resolved, mediaType, season, episode, options) {
+  return __async(this, null, function* () {
+    const info = yield fetchJson(`${CONFIG.TMDB_API_BASE}/${mediaType}/${resolved}?api_key=${CONFIG.TMDB_API_KEY}`);
+    const name = mediaType === "movie" ? info.title : info.name;
+    const orig = mediaType === "movie" ? info.original_title : info.original_name;
+    const keywords = [];
+    if (name)
+      keywords.push(String(name));
+    if (orig && String(orig) !== String(name))
+      keywords.push(String(orig));
+    if (!keywords.length)
+      return [];
+    const want = Number(season);
+    const seen = /* @__PURE__ */ new Set();
+    for (const kw of keywords) {
+      const kwL = kw.toLowerCase();
+      const search = yield fetchJson(`${CONFIG.BASE_URL}/tim-kiem?keyword=${encodeURIComponent(kw)}`);
+      const items = search && search.data && Array.isArray(search.data.items) ? search.data.items : [];
+      const plausible = items.filter((it) => {
+        const hay = `${it.name || ""} ${it.origin_name || ""}`.toLowerCase();
+        return hay.indexOf(kwL) !== -1;
+      });
+      const ordered = plausible.filter((it) => it && typeof it.slug === "string").sort((a, b) => (parsePhan(a) === want ? 0 : 1) - (parsePhan(b) === want ? 0 : 1));
+      for (const it of ordered.slice(0, 3)) {
+        if (seen.has(it.slug))
+          continue;
+        seen.add(it.slug);
+        try {
+          const d = yield fetchJson(`${CONFIG.BASE_URL}/phim/${it.slug}`);
+          if (!d || d.status !== true)
+            continue;
+          const mv = d.movie || {};
+          const exact = String(mv.tmdb && mv.tmdb.id || "") === String(resolved);
+          const kwHit = String(mv.origin_name || "").toLowerCase().indexOf(kw.toLowerCase()) === 0;
+          if (mediaType === "tv" && parsePhan(mv) !== want)
+            continue;
+          if (!exact && !kwHit)
+            continue;
+          const s = toStreams(d, mediaType, season, episode, options);
+          if (s.length)
+            return s;
+        } catch (e) {
+        }
+      }
+    }
+    return [];
+  });
+}
 function extractStreams(_0, _1, _2, _3) {
   return __async(this, arguments, function* (tmdbId, mediaType, season, episode, options = {}) {
     const resolved = yield resolveTmdbId(tmdbId, mediaType);
-    const url = `${CONFIG.BASE_URL}/tmdb/${mediaType}/${resolved}`;
-    const data = yield fetchJson(url);
+    let data = null;
+    try {
+      data = yield fetchJson(`${CONFIG.BASE_URL}/tmdb/${mediaType}/${resolved}`);
+    } catch (e) {
+      if (!String(e.message).startsWith("HTTP ")) {
+        try {
+          data = yield fetchJson(`${CONFIG.BASE_URL}/tmdb/${mediaType}/${resolved}`);
+        } catch (e2) {
+        }
+      }
+    }
     let streams = toStreams(data, mediaType, season, episode, options);
     if (mediaType === "tv" && streams.length === 0 && data && data.status === true && data.movie) {
       try {
         streams = yield searchSeasonFallback(data.movie, season, episode, options);
         if (streams.length) {
-          console.warn(`[KKPhim] TV ${resolved}: fallback theo t\xEAn l\u1EA5y \u0111\u01B0\u1EE3c ${streams.length} streams cho Season ${season}.`);
+          console.warn(`[KKPhim] TV ${resolved}: fallback theo t\xEAn VN l\u1EA5y \u0111\u01B0\u1EE3c ${streams.length} streams cho Season ${season}.`);
         }
       } catch (e) {
         console.warn(`[KKPhim] TV ${resolved}: fallback search l\u1ED7i: ${e.message}`);
+      }
+    }
+    if (streams.length === 0 && (!data || data.status !== true || !data.movie)) {
+      try {
+        streams = yield titleSearchFallback(resolved, mediaType, season, episode, options);
+        if (streams.length) {
+          console.warn(`[KKPhim] ${mediaType} ${resolved}: kh\xF4ng c\xF3 tag tmdb tr\xEAn KKPhim, t\xECm theo title -> ${streams.length} streams.`);
+        }
+      } catch (e) {
+        console.warn(`[KKPhim] ${mediaType} ${resolved}: title fallback l\u1ED7i: ${e.message}`);
       }
     }
     return streams;

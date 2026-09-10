@@ -88,7 +88,7 @@ export async function searchSeasonFallback(movie, season, episode, options) {
     const items = (search && search.data && Array.isArray(search.data.items)) ? search.data.items : [];
     const want = Number(season);
 
-    for (const it of items.slice(0, 5)) {
+    for (const it of items.slice(0, 3)) {
         if (!it || typeof it.slug !== 'string' || parsePhan(it) !== want) continue;
         try {
             const d = await fetchJson(`${CONFIG.BASE_URL}/phim/${it.slug}`);
@@ -97,6 +97,60 @@ export async function searchSeasonFallback(movie, season, episode, options) {
                 if (s.length) return s;
             }
         } catch (e) { /* skip item lỗi */ }
+    }
+    return [];
+}
+
+/**
+ * Fallback cuối cho phim KHÔNG có tag tmdb trên KKPhim: /tmdb/{type}/{id} -> 404.
+ * Lấy title tiếng Anh từ TMDB API (name/original_name), search /tim-kiem — KKPhim
+ * khớp trên origin_name ("The Apothecary Diaries" -> item "Dược Sư Tự Sự (Phần N)"),
+ * verify từng candidate bằng tmdb.id khớp (tagged) hoặc origin_name chứa keyword,
+ * TV bắt buộc parsePhan == season yêu cầu để tránh lấy nhầm phim cùng keyword.
+ */
+export async function titleSearchFallback(resolved, mediaType, season, episode, options) {
+    const info = await fetchJson(`${CONFIG.TMDB_API_BASE}/${mediaType}/${resolved}?api_key=${CONFIG.TMDB_API_KEY}`);
+    const name = mediaType === 'movie' ? info.title : info.name;
+    const orig = mediaType === 'movie' ? info.original_title : info.original_name;
+    const keywords = [];
+    if (name) keywords.push(String(name));
+    if (orig && String(orig) !== String(name)) keywords.push(String(orig));
+    if (!keywords.length) return [];
+
+    const want = Number(season);
+    const seen = new Set();
+    for (const kw of keywords) {
+        // Prefilter theo keyword TIẾT KIỆM request: chỉ fetch detail các item có
+        // name/origin_name chứa keyword — tránh quét loạt item không liên quan
+        // (search keyword phổ biến như "Game of Thrones" trả nhiều phim khác).
+        const kwL = kw.toLowerCase();
+        const search = await fetchJson(`${CONFIG.BASE_URL}/tim-kiem?keyword=${encodeURIComponent(kw)}`);
+        const items = (search && search.data && Array.isArray(search.data.items)) ? search.data.items : [];
+        const plausible = items.filter((it) => {
+            const hay = `${it.name || ''} ${it.origin_name || ''}`.toLowerCase();
+            return hay.indexOf(kwL) !== -1;
+        });
+        const ordered = plausible
+            .filter((it) => it && typeof it.slug === 'string')
+            .sort((a, b) => ((parsePhan(a) === want) ? 0 : 1) - ((parsePhan(b) === want) ? 0 : 1));
+
+        for (const it of ordered.slice(0, 3)) {
+            if (seen.has(it.slug)) continue;
+            seen.add(it.slug);
+            try {
+                const d = await fetchJson(`${CONFIG.BASE_URL}/phim/${it.slug}`);
+                if (!d || d.status !== true) continue;
+                const mv = d.movie || {};
+                const exact = String((mv.tmdb && mv.tmdb.id) || '') === String(resolved);
+                const kwHit = String(mv.origin_name || '')
+                    .toLowerCase()
+                    .indexOf(kw.toLowerCase()) === 0;
+                if (mediaType === 'tv' && parsePhan(mv) !== want) continue;
+                if (!exact && !kwHit) continue;
+                const s = toStreams(d, mediaType, season, episode, options);
+                if (s.length) return s;
+            } catch (e) { /* skip item lỗi */ }
+        }
     }
     return [];
 }
@@ -111,20 +165,44 @@ export async function searchSeasonFallback(movie, season, episode, options) {
  */
 export async function extractStreams(tmdbId, mediaType, season, episode, options = {}) {
     const resolved = await resolveTmdbId(tmdbId, mediaType);
-    const url = `${CONFIG.BASE_URL}/tmdb/${mediaType}/${resolved}`;
-    const data = await fetchJson(url);
+
+    // /tmdb/{type}/{id} trả 404 khi KKPhim không gắn tag tmdb -> fetchJson throw.
+    // Retry 1 lần cho timeout/network (phimapi chậm giờ cao điểm); HTTP lỗi xác định
+    // (404) thì không retry — chuyển thẳng title fallback.
+    let data = null;
+    try {
+        data = await fetchJson(`${CONFIG.BASE_URL}/tmdb/${mediaType}/${resolved}`);
+    } catch (e) {
+        if (!String(e.message).startsWith('HTTP ')) {
+            try {
+                data = await fetchJson(`${CONFIG.BASE_URL}/tmdb/${mediaType}/${resolved}`);
+            } catch (e2) { /* bỏ qua -> title fallback */ }
+        }
+    }
 
     let streams = toStreams(data, mediaType, season, episode, options);
 
-    // TV + primary không ra gì -> thử tìm item season khác theo tên trên KKPhim
+    // 1) TV + primary không ra gì: tìm item "Phần N" cùng phim qua search tên VN
     if (mediaType === 'tv' && streams.length === 0 && data && data.status === true && data.movie) {
         try {
             streams = await searchSeasonFallback(data.movie, season, episode, options);
             if (streams.length) {
-                console.warn(`[KKPhim] TV ${resolved}: fallback theo tên lấy được ${streams.length} streams cho Season ${season}.`);
+                console.warn(`[KKPhim] TV ${resolved}: fallback theo tên VN lấy được ${streams.length} streams cho Season ${season}.`);
             }
         } catch (e) {
             console.warn(`[KKPhim] TV ${resolved}: fallback search lỗi: ${e.message}`);
+        }
+    }
+
+    // 2) Vẫn 0 và KKPhim không có entry tmdb: tìm theo title EN qua TMDB API
+    if (streams.length === 0 && (!data || data.status !== true || !data.movie)) {
+        try {
+            streams = await titleSearchFallback(resolved, mediaType, season, episode, options);
+            if (streams.length) {
+                console.warn(`[KKPhim] ${mediaType} ${resolved}: không có tag tmdb trên KKPhim, tìm theo title -> ${streams.length} streams.`);
+            }
+        } catch (e) {
+            console.warn(`[KKPhim] ${mediaType} ${resolved}: title fallback lỗi: ${e.message}`);
         }
     }
     return streams;
