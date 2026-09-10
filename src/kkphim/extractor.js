@@ -83,7 +83,14 @@ export function toStreams(data, mediaType, season, episode, options = {}) {
 
     // Gate season: KKPhim chỉ có 1 entry/season; nếu không khớp và strict -> từ chối
     if (mediaType === 'tv' && tmdbSeason != null && Number(season) !== tmdbSeason) {
-        if (strictSeason) return [];
+        if (strictSeason) {
+            console.warn(
+                `[KKPhim] TV ${movie.tmdb ? movie.tmdb.id : '?'}: yêu cầu Season ${season} ` +
+                `nhưng KKPhim chỉ có Season ${tmdbSeason} -> [] (strict). ` +
+                `Chọn đúng season trong app, hoặc STRICT_SEASON=false để lấy stream kèm nhãn "[Phần N]".`
+            );
+            return [];
+        }
     }
 
     const isMovie = mediaType === 'movie';
@@ -114,6 +121,10 @@ export function toStreams(data, mediaType, season, episode, options = {}) {
             });
         });
     });
+    if (!isMovie && streams.length === 0) {
+        console.warn(`[KKPhim] TV ${movie.tmdb ? movie.tmdb.id : '?'}: không có stream cho S${season}E${episode} (KKPhim đang giữ S${tmdbSeason ?? '?'}).`);
+    }
+
 
     return streams;
 }

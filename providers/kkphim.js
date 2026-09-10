@@ -1,6 +1,6 @@
 /**
  * kkphim - Built from src/kkphim/
- * Generated: 2026-09-10T08:42:26.447Z
+ * Generated: 2026-09-10T08:52:44.294Z
  */
 var __defProp = Object.defineProperty;
 var __defProps = Object.defineProperties;
@@ -130,8 +130,12 @@ function toStreams(data, mediaType, season, episode, options = {}) {
   const strictSeason = options.strictSeason !== void 0 ? options.strictSeason : CONFIG.STRICT_SEASON;
   const tmdbSeason = movie.tmdb && movie.tmdb.season != null ? Number(movie.tmdb.season) : null;
   if (mediaType === "tv" && tmdbSeason != null && Number(season) !== tmdbSeason) {
-    if (strictSeason)
+    if (strictSeason) {
+      console.warn(
+        `[KKPhim] TV ${movie.tmdb ? movie.tmdb.id : "?"}: y\xEAu c\u1EA7u Season ${season} nh\u01B0ng KKPhim ch\u1EC9 c\xF3 Season ${tmdbSeason} -> [] (strict). Ch\u1ECDn \u0111\xFAng season trong app, ho\u1EB7c STRICT_SEASON=false \u0111\u1EC3 l\u1EA5y stream k\xE8m nh\xE3n "[Ph\u1EA7n N]".`
+      );
       return [];
+    }
   }
   const isMovie = mediaType === "movie";
   const wantEp = Number(episode);
@@ -158,6 +162,9 @@ function toStreams(data, mediaType, season, episode, options = {}) {
       });
     });
   });
+  if (!isMovie && streams.length === 0) {
+    console.warn(`[KKPhim] TV ${movie.tmdb ? movie.tmdb.id : "?"}: kh\xF4ng c\xF3 stream cho S${season}E${episode} (KKPhim \u0111ang gi\u1EEF S${tmdbSeason != null ? tmdbSeason : "?"}).`);
+  }
   return streams;
 }
 function labelFor(tmdbSeason, season, strictSeason) {
