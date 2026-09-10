@@ -311,20 +311,23 @@ async function buildStreams(movie, item, episode, reqSeason) {
     for (const ent of entries) {
         try {
             const { url, origin } = await resolveEmbedPlaylist(ent.embed);
+            // headers TOP-LEVEL: PluginRuntime.parseJsonResults chỉ giữ whitelist
+            // (item["headers"]) và StreamFetchSupport map sang proxyHeaders — nếu để
+            // riêng behaviorHints.proxyHeaders thì runtime local sẽ VỨT MẤT headers.
+            const headers = {
+                Referer: `${origin}/`,
+                Origin: origin,
+                'User-Agent': CONFIG.STREAM_UA,
+                Accept: '*/*',
+            };
             streams.push({
                 name: CONFIG.PROVIDER_NAME,
                 title: `${ent.server} · Tập ${ent.entryName}`,
                 url,
                 type: 'hls',
+                headers,
                 behaviorHints: {
-                    proxyHeaders: {
-                        request: {
-                            Referer: `${origin}/`,
-                            Origin: origin,
-                            'User-Agent': CONFIG.STREAM_UA,
-                            Accept: '*/*',
-                        },
-                    },
+                    proxyHeaders: { request: headers },
                     videoHash: embedHash(ent.embed),
                 },
             });

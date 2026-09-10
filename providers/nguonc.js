@@ -1,6 +1,6 @@
 /**
  * nguonc - Built from src/nguonc/
- * Generated: 2026-09-10T12:15:02.372Z
+ * Generated: 2026-09-10T12:27:43.644Z
  */
 var __defProp = Object.defineProperty;
 var __defProps = Object.defineProperties;
@@ -458,20 +458,20 @@ function buildStreams(movie, item, episode, reqSeason) {
     for (const ent of entries) {
       try {
         const { url, origin } = yield resolveEmbedPlaylist(ent.embed);
+        const headers = {
+          Referer: `${origin}/`,
+          Origin: origin,
+          "User-Agent": CONFIG.STREAM_UA,
+          Accept: "*/*"
+        };
         streams.push({
           name: CONFIG.PROVIDER_NAME,
           title: `${ent.server} \xB7 T\u1EADp ${ent.entryName}`,
           url,
           type: "hls",
+          headers,
           behaviorHints: {
-            proxyHeaders: {
-              request: {
-                Referer: `${origin}/`,
-                Origin: origin,
-                "User-Agent": CONFIG.STREAM_UA,
-                Accept: "*/*"
-              }
-            },
+            proxyHeaders: { request: headers },
             videoHash: embedHash(ent.embed)
           }
         });
