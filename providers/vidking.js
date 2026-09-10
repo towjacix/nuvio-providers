@@ -1,6 +1,6 @@
 /**
  * vidking - Built from src/vidking/
- * Generated: 2026-09-10T14:17:35.791Z
+ * Generated: 2026-09-10T14:24:56.467Z
  */
 var __defProp = Object.defineProperty;
 var __defProps = Object.defineProperties;
