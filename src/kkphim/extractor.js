@@ -105,6 +105,110 @@ export async function searchSeasonFallback(movie, season, episode, options, base
     }
     return [];
 }
+const isAdSegmentUrl = (url) => !!url
+    && (url.indexOf('/adjump/') !== -1
+        || ((url.indexOf('/v7/') !== -1 || url.indexOf('/v8/') !== -1) && url.indexOf('segment_') !== -1));
+
+const absolutizeUrl = (segUrl, playUrl) => {
+    if (/^https?:\/\//i.test(segUrl)) return segUrl;
+    if (segUrl.charAt(0) === '/') {
+        const m = /^(https?:\/\/[^/]+)/.exec(playUrl);
+        return m ? m[1] + segUrl : segUrl;
+    }
+    return playUrl.slice(0, playUrl.lastIndexOf('/') + 1) + segUrl;
+};
+// Port InterceptorUtilKt.removeAdsKKphim (CloudStream): drop block DISCONTINUITY có /v7/|/v8/+segment_|/adjump/,
+// giữ nguyên block sạch; convertv7/8 = content → strip prefix. Trả về {playlist, changed}.
+export function removeAdsFromPlaylist(playlist, playUrl) {
+    const out = [];
+    let block = [];
+    let inBlock = false;
+    let blockHasAd = false;
+    let changed = false;
+
+    String(playlist || '').split('\n').forEach((ln) => {
+        const line = ln.trim();
+        if (!line) return;
+
+        if (line.indexOf('convertv7/') === 0 || line.indexOf('convertv8/') === 0) {
+            out.push(absolutizeUrl(line.replace(/^convertv7\//, '').replace(/^convertv8\//, ''), playUrl));
+            changed = true;
+            return;
+        }
+
+        if (!inBlock && line.charAt(0) !== '#' && line !== '') {
+            out.push(absolutizeUrl(line, playUrl));
+            return;
+        }
+
+        if (line === '#EXT-X-DISCONTINUITY') {
+            if (inBlock) {
+                if (!blockHasAd) out.push.apply(out, block);
+                else changed = true;
+                block = [];
+                blockHasAd = false;
+            }
+            inBlock = !inBlock;
+            if (inBlock) block.push(line);
+            return;
+        }
+
+        if (inBlock) {
+            block.push(line.charAt(0) === '#' ? line : absolutizeUrl(line, playUrl));
+            if (isAdSegmentUrl(line)) blockHasAd = true;
+            return;
+        }
+
+        out.push(line);
+    });
+
+    if (inBlock && !blockHasAd) out.push.apply(out, block);
+    if (inBlock && blockHasAd) changed = true;
+    return { playlist: out.join('\n'), changed };
+}
+
+// Giải master playlist (#EXT-X-STREAM-INF) → các variant, chọn bandwidth cao nhất.
+function pickTopVariant(masterText, masterUrl) {
+    let bw = 0;
+    const variants = [];
+    String(masterText || '').split('\n').forEach((ln) => {
+        const line = ln.trim();
+        if (line.indexOf('#EXT-X-STREAM-INF') === 0) {
+            const m = line.match(/BANDWIDTH=(\d+)/i);
+            bw = m ? Number(m[1]) : 0;
+        } else if (bw > 0 && line && line.charAt(0) !== '#') {
+            variants.push({ url: absolutizeUrl(line, masterUrl), bw });
+            bw = 0;
+        }
+    });
+    variants.sort((a, b) => b.bw - a.bw);
+    return variants.length ? variants[0].url : null;
+}
+
+// Lọc ad cho stream HLS: master → variant cao nhất (nếu có) → removeAdsFromPlaylist.
+// Playlist đổi → data: URI, không đổi/lỗi → giữ URL gốc.
+export async function adFilterStream(stream) {
+    if (!/m3u8/i.test(stream.url || '')) return stream;
+    try {
+        let playUrl = stream.url;
+        let text = await fetchText(playUrl);
+        if (!text || text.indexOf('#EXTM3U') === -1) return stream;
+        if (text.indexOf('#EXT-X-STREAM-INF') !== -1) {
+            playUrl = pickTopVariant(text, playUrl);
+            if (!playUrl) return stream;
+            text = await fetchText(playUrl);
+            if (!text || text.indexOf('#EXTM3U') === -1) return stream;
+        }
+        const { playlist, changed } = removeAdsFromPlaylist(text, playUrl);
+        if (!changed) return stream;
+        return Object.assign({}, stream, {
+            url: 'data:application/vnd.apple.mpegurl;charset=utf-8,' + encodeURIComponent(playlist),
+        });
+    } catch (e) {
+        console.warn(`[KKPhim] ad-filter giữ URL gốc (${e.message})`);
+        return stream;
+    }
+}
 
 /** /tmdb 404 → lấy title EN từ TMDB API → search /tim-kiem → verify candidate. */
 export async function titleSearchFallback(resolved, mediaType, season, episode, options, base) {
@@ -189,6 +293,12 @@ export async function extractStreams(tmdbId, mediaType, season, episode, options
         } catch (e) {
             console.warn(`[KKPhim] ${mediaType} ${resolved}: title fallback lỗi: ${e.message}`);
         }
+    }
+
+    if (CONFIG.AD_FILTER && streams.length) {
+        streams = await Promise.all(streams.map((s) => adFilterStream(s)));
+        const dataUris = streams.filter((s) => (s.url || '').indexOf('data:') === 0).length;
+        if (dataUris) console.warn(`[KKPhim] ad-filter: ${dataUris}/${streams.length} stream chứa ad đã drop (data: URI).`);
     }
     return streams;
 }

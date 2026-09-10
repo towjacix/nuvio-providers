@@ -1,6 +1,6 @@
 /**
  * kkphim - Built from src/kkphim/
- * Generated: 2026-09-10T10:02:01.371Z
+ * Generated: 2026-09-10T10:30:49.243Z
  */
 var __defProp = Object.defineProperty;
 var __defProps = Object.defineProperties;
@@ -50,6 +50,8 @@ var CONFIG = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
     Accept: "application/json"
   },
+  // Lọc ad playlist m3u8 (port removeAdsKKphim CloudStream) → data: URI. App phải hỗ trợ data: URI.
+  AD_FILTER: true,
   PROVIDER_NAME: "KKPhim",
   // true  → season lệch thì fallback tìm item "Phần N" khác; cuối cùng ko có → []
   // false → dùng item /tmdb dù lệch season, title ghi "[Phần {N}]" để user tự quyết
@@ -196,6 +198,108 @@ function searchSeasonFallback(movie, season, episode, options, base) {
     return [];
   });
 }
+var isAdSegmentUrl = (url) => !!url && (url.indexOf("/adjump/") !== -1 || (url.indexOf("/v7/") !== -1 || url.indexOf("/v8/") !== -1) && url.indexOf("segment_") !== -1);
+var absolutizeUrl = (segUrl, playUrl) => {
+  if (/^https?:\/\//i.test(segUrl))
+    return segUrl;
+  if (segUrl.charAt(0) === "/") {
+    const m = /^(https?:\/\/[^/]+)/.exec(playUrl);
+    return m ? m[1] + segUrl : segUrl;
+  }
+  return playUrl.slice(0, playUrl.lastIndexOf("/") + 1) + segUrl;
+};
+function removeAdsFromPlaylist(playlist, playUrl) {
+  const out = [];
+  let block = [];
+  let inBlock = false;
+  let blockHasAd = false;
+  let changed = false;
+  String(playlist || "").split("\n").forEach((ln) => {
+    const line = ln.trim();
+    if (!line)
+      return;
+    if (line.indexOf("convertv7/") === 0 || line.indexOf("convertv8/") === 0) {
+      out.push(absolutizeUrl(line.replace(/^convertv7\//, "").replace(/^convertv8\//, ""), playUrl));
+      changed = true;
+      return;
+    }
+    if (!inBlock && line.charAt(0) !== "#" && line !== "") {
+      out.push(absolutizeUrl(line, playUrl));
+      return;
+    }
+    if (line === "#EXT-X-DISCONTINUITY") {
+      if (inBlock) {
+        if (!blockHasAd)
+          out.push.apply(out, block);
+        else
+          changed = true;
+        block = [];
+        blockHasAd = false;
+      }
+      inBlock = !inBlock;
+      if (inBlock)
+        block.push(line);
+      return;
+    }
+    if (inBlock) {
+      block.push(line.charAt(0) === "#" ? line : absolutizeUrl(line, playUrl));
+      if (isAdSegmentUrl(line))
+        blockHasAd = true;
+      return;
+    }
+    out.push(line);
+  });
+  if (inBlock && !blockHasAd)
+    out.push.apply(out, block);
+  if (inBlock && blockHasAd)
+    changed = true;
+  return { playlist: out.join("\n"), changed };
+}
+function pickTopVariant(masterText, masterUrl) {
+  let bw = 0;
+  const variants = [];
+  String(masterText || "").split("\n").forEach((ln) => {
+    const line = ln.trim();
+    if (line.indexOf("#EXT-X-STREAM-INF") === 0) {
+      const m = line.match(/BANDWIDTH=(\d+)/i);
+      bw = m ? Number(m[1]) : 0;
+    } else if (bw > 0 && line && line.charAt(0) !== "#") {
+      variants.push({ url: absolutizeUrl(line, masterUrl), bw });
+      bw = 0;
+    }
+  });
+  variants.sort((a, b) => b.bw - a.bw);
+  return variants.length ? variants[0].url : null;
+}
+function adFilterStream(stream) {
+  return __async(this, null, function* () {
+    if (!/m3u8/i.test(stream.url || ""))
+      return stream;
+    try {
+      let playUrl = stream.url;
+      let text = yield fetchText(playUrl);
+      if (!text || text.indexOf("#EXTM3U") === -1)
+        return stream;
+      if (text.indexOf("#EXT-X-STREAM-INF") !== -1) {
+        playUrl = pickTopVariant(text, playUrl);
+        if (!playUrl)
+          return stream;
+        text = yield fetchText(playUrl);
+        if (!text || text.indexOf("#EXTM3U") === -1)
+          return stream;
+      }
+      const { playlist, changed } = removeAdsFromPlaylist(text, playUrl);
+      if (!changed)
+        return stream;
+      return Object.assign({}, stream, {
+        url: "data:application/vnd.apple.mpegurl;charset=utf-8," + encodeURIComponent(playlist)
+      });
+    } catch (e) {
+      console.warn(`[KKPhim] ad-filter gi\u1EEF URL g\u1ED1c (${e.message})`);
+      return stream;
+    }
+  });
+}
 function titleSearchFallback(resolved, mediaType, season, episode, options, base) {
   return __async(this, null, function* () {
     const info = yield fetchJson(`${CONFIG.TMDB_API_BASE}/${mediaType}/${resolved}?api_key=${CONFIG.TMDB_API_KEY}`);
@@ -279,6 +383,12 @@ function extractStreams(_0, _1, _2, _3) {
       } catch (e) {
         console.warn(`[KKPhim] ${mediaType} ${resolved}: title fallback l\u1ED7i: ${e.message}`);
       }
+    }
+    if (CONFIG.AD_FILTER && streams.length) {
+      streams = yield Promise.all(streams.map((s) => adFilterStream(s)));
+      const dataUris = streams.filter((s) => (s.url || "").indexOf("data:") === 0).length;
+      if (dataUris)
+        console.warn(`[KKPhim] ad-filter: ${dataUris}/${streams.length} stream ch\u1EE9a ad \u0111\xE3 drop (data: URI).`);
     }
     return streams;
   });
@@ -365,4 +475,4 @@ function getStreams(tmdbId, mediaType, season, episode, options) {
     }
   });
 }
-module.exports = { getStreams, resetBaseUrlCache };
+module.exports = { getStreams, removeAdsFromPlaylist, resetBaseUrlCache };

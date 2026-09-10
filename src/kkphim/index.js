@@ -1,4 +1,4 @@
-import { extractStreams, resetBaseUrlCache } from './extractor.js';
+import { extractStreams, removeAdsFromPlaylist, resetBaseUrlCache } from './extractor.js';
 
 async function getStreams(tmdbId, mediaType, season, episode, options) {
     try {
@@ -9,4 +9,4 @@ async function getStreams(tmdbId, mediaType, season, episode, options) {
     }
 }
 
-module.exports = { getStreams, resetBaseUrlCache };
+module.exports = { getStreams, removeAdsFromPlaylist, resetBaseUrlCache };
