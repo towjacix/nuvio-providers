@@ -32,13 +32,19 @@ export async function resolveBaseUrl() {
     }
     if (!base) base = CONFIG.BASE_URL;
 
+    // Chỉ cache khi probe thành công. Fail → thử fallback cho request NÀY,
+    // nhưng KHÔNG lưu (site hay reset kết nối, lần sau phải thử lại domain chính).
     try {
         await fetchText(base + '/');
         cachedBaseUrl = base;
         return base;
     } catch (e) {
-        cachedBaseUrl = CONFIG.FALLBACK_BASE_URL;
-        return cachedBaseUrl;
+        try {
+            await fetchText(CONFIG.FALLBACK_BASE_URL + '/');
+            return CONFIG.FALLBACK_BASE_URL;
+        } catch (e2) {
+            return base;
+        }
     }
 }
 
@@ -91,28 +97,47 @@ export function decodeEntities(s) {
 }
 
 /**
- * Parse kết quả search: li.film-item-ver → {href, name, year}.
- * .real-name chứa năm (vd "2026").
+ * Parse kết quả search → {href, name, year}.
+ * Kết quả THẬT nằm trong `li.item` (div.name > span, KHÔNG có năm).
+ * `li.film-item-ver` là widget "phim mới" ở cuối trang — CHỈ dùng làm fallback
+ * (CS3 cũng bốc film-item-ver, nhưng ở trang search đó là danh sách phụ).
+ * year: film-item-ver có .real-name; item không có → ''.
  */
 export function parseSearchResults(html) {
+    const src = String(html || '');
     const items = [];
     const seen = new Set();
-    const liRe = /<li[^>]*class="film-item-ver"[^>]*>([\s\S]*?)<\/li>/gi;
+    const push = (href, name, year, isResult) => {
+        if (!href || seen.has(href)) return;
+        seen.add(href);
+        items.push({ href, name, year, isResult });
+    };
+
+    // 1) Kết quả thật: <li class="item ..."> — "item" hoặc "item" + class phụ
+    //    (grid thêm "no-margin-left" mỗi hàng; KHÔNG khớp menu-item/sub-menu-item).
+    const itemRe = /<li[^>]*class="item(?:\s[^"]*)?"[^>]*>([\s\S]*?)<\/li>/gi;
     let m;
-    while ((m = liRe.exec(html)) !== null) {
+    while ((m = itemRe.exec(src)) !== null) {
         const block = m[1];
         const hrefM = block.match(/<a[^>]*href="(\/phim\/[^"]+)"/i);
         if (!hrefM) continue;
-        const href = hrefM[1];
-        if (seen.has(href)) continue;
-        seen.add(href);
+        const nameM = block.match(/<div[^>]*class="name"[^>]*>[\s\S]*?<span[^>]*>([\s\S]*?)<\/span>/i);
+        const name = decodeEntities(nameM ? nameM[1].replace(/<[^>]+>/g, '').trim() : '').trim();
+        if (name) push(hrefM[1], name, '', true);
+    }
+
+    // 2) Fallback: film-item-ver (widget "phim mới" / layout cũ) — isResult=false.
+    const verRe = /<li[^>]*class="film-item-ver"[^>]*>([\s\S]*?)<\/li>/gi;
+    while ((m = verRe.exec(src)) !== null) {
+        const block = m[1];
+        const hrefM = block.match(/<a[^>]*href="(\/phim\/[^"]+)"/i);
+        if (!hrefM) continue;
         const nameM = block.match(/<p[^>]*class="name"[^>]*>\s*<a[^>]*>([\s\S]*?)<\/a>/i);
         const yearM = block.match(/<p[^>]*class="real-name"[^>]*>([\s\S]*?)<\/p>/i);
         const name = decodeEntities(nameM ? nameM[1].replace(/<[^>]+>/g, '').trim() : '').trim();
         const yearRaw = decodeEntities(yearM ? yearM[1].replace(/<[^>]+>/g, '').trim() : '').trim();
         const year = /^\d{4}$/.test(yearRaw) ? yearRaw : '';
-        if (!name) continue;
-        items.push({ href, name, year });
+        if (name) push(hrefM[1], name, year, false);
     }
     return items;
 }
@@ -191,19 +216,15 @@ export function searchKeyword(title) {
 
 export async function pickCandidate(base, candidates, meta) {
     if (!candidates.length) return null;
+    // isResult (li.item = kết quả thật) +3 — sidebar film-item-ver khớp year cũng chỉ đạt 2.
+    const score = (c) => (c.isResult ? 3 : 0) + slugScore(c.href, meta.title)
+        + (meta.year && c.year === meta.year ? 2 : 0);
     const ranked = candidates
-        .map((c) => ({
-            c,
-            score: slugScore(c.href, meta.title) + (meta.year && c.year === meta.year ? 2 : 0),
-        }))
+        .map((c) => ({ c, score: score(c) }))
         .sort((a, b) => b.score - a.score)
         .map((x) => x.c);
-    // Không có dấu hiệu khớp nào (slug 0 điểm + lệch năm) → bỏ, tránh verify vô ích.
-    if (ranked.length && slugScore(ranked[0].href, meta.title) === 0
-        && !(meta.year && ranked[0].year === meta.year)) {
-        const anyYear = candidates.some((c) => meta.year && c.year === meta.year);
-        if (!anyYear) return null;
-    }
+    // Toàn rác (không ai khớp slug lẫn năm) → bỏ, tránh verify vô ích.
+    if (ranked.length && score(ranked[0]) === 0) return null;
     const ordered = ranked.slice(0, CONFIG.MAX_VERIFY_CANDIDATES);
 
     if (meta.imdbId) {
@@ -254,8 +275,21 @@ export async function extractStreams(tmdbId, mediaType, season, episode) {
         return [];
     }
 
-    const searchHtml = await fetchText(`${base}/search?k=${encodeURIComponent(searchKeyword(meta.title))}`);
-    const candidates = parseSearchResults(searchHtml);
+    // Search site hay trả rác ("phim mới cập nhật") thay vì kết quả — retry tối đa 3 lần
+    // nếu không có ứng viên nào, hoặc không ai khớp slug/năm với meta.
+    let candidates = [];
+    const maxScore = (list) => list.reduce((m, c) => {
+        const s = (c.isResult ? 3 : 0) + slugScore(c.href, meta.title)
+            + (meta.year && c.year === meta.year ? 2 : 0);
+        return s > m ? s : m;
+    }, 0);
+    for (let attempt = 0; attempt < 3; attempt++) {
+        const searchHtml = await fetchText(
+            `${base}/search?k=${encodeURIComponent(searchKeyword(meta.title))}`
+        );
+        candidates = parseSearchResults(searchHtml);
+        if (candidates.length && (attempt === 2 || maxScore(candidates) > 0)) break;
+    }
     if (!candidates.length) return [];
 
     const picked = await pickCandidate(base, candidates, meta);
@@ -272,12 +306,22 @@ export async function extractStreams(tmdbId, mediaType, season, episode) {
         watchUrl = `${base + watchHref}/tap-${ep}`;
     }
 
-    const watchHtml = await fetchText(watchUrl);
-    const iframeSrc = parseIframeSrc(watchHtml);
+    let watchHtml = await fetchText(watchUrl);
+    let iframeSrc = parseIframeSrc(watchHtml);
+    // Server mặc định = moviking /embed (FingerprintJS + WebGL + anti-devtools
+    // — không tái tạo trong quickjs). Server 3rd = /embed3rd (không fingerprint)
+    // qua ?sv2=true. Chỉ ép sv2 khi iframe đang là /embed trần.
+    if (/\/embed\?/i.test(iframeSrc) && !/embed3rd/i.test(iframeSrc)) {
+        const sv2 = `${watchUrl}${watchUrl.includes('?') ? '&' : '?'}sv2=true`;
+        try {
+            const html2 = await fetchText(sv2);
+            const src2 = parseIframeSrc(html2);
+            if (src2) { watchHtml = html2; iframeSrc = src2; }
+        } catch (e) { /* giữ server gốc */ }
+    }
     if (!iframeSrc) return [];
 
     const streamUrl = await resolveEmbedStream(iframeSrc, watchUrl);
-    if (!streamUrl) return [];
 
     let quality = '';
     try {

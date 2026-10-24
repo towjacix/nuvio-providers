@@ -1,6 +1,6 @@
 /**
  * bluphim - Built from src/bluphim/
- * Generated: 2026-09-10T17:04:36.320Z
+ * Generated: 2026-10-24T16:09:33.886Z
  */
 var __defProp = Object.defineProperty;
 var __defProps = Object.defineProperties;
@@ -56,7 +56,8 @@ var CONFIG = {
   TMDB_API_BASE: "https://api.themoviedb.org/3",
   TMDB_API_KEY: "1865f43a0549ca50d341dd9ab8b29f49",
   // Số ứng viên detail tối đa để verify imdb
-  MAX_VERIFY_CANDIDATES: 4
+  // (search trả ~10 li.item thật; entry đúng hay đứng sau 4-5 tựa gần tên)
+  MAX_VERIFY_CANDIDATES: 10
 };
 
 // src/bluphim/http.js
@@ -102,19 +103,35 @@ function request(_0) {
         } catch (e2) {
         }
       }
-      throw new Error(e && e.name === "AbortError" ? `timeout sau ${TIMEOUT_MS}ms` : e && e.message || "fetch error");
+      const msg = e && e.name === "AbortError" ? `timeout sau ${TIMEOUT_MS}ms` : e && e.message || "fetch error";
+      const err = new Error(msg);
+      if (/^HTTP (\d+)/.test(msg))
+        err.status = Number(msg.match(/^HTTP (\d+)/)[1]);
+      throw err;
+    }
+  });
+}
+var RETRYABLE = (e) => !(e && e.status && e.status >= 400 && e.status < 500);
+function requestWithRetry(_0) {
+  return __async(this, arguments, function* (url, options = {}) {
+    try {
+      return yield request(url, options);
+    } catch (e) {
+      if (!RETRYABLE(e))
+        throw e;
+      return yield request(url, options);
     }
   });
 }
 function fetchJson(_0) {
   return __async(this, arguments, function* (url, options = {}) {
-    const response = yield request(url, options);
+    const response = yield requestWithRetry(url, options);
     return yield response.json();
   });
 }
 function fetchText(_0) {
   return __async(this, arguments, function* (url, options = {}) {
-    const response = yield request(url, options);
+    const response = yield requestWithRetry(url, options);
     return yield response.text();
   });
 }
@@ -148,8 +165,12 @@ function resolveBaseUrl() {
       cachedBaseUrl = base;
       return base;
     } catch (e) {
-      cachedBaseUrl = CONFIG.FALLBACK_BASE_URL;
-      return cachedBaseUrl;
+      try {
+        yield fetchText(CONFIG.FALLBACK_BASE_URL + "/");
+        return CONFIG.FALLBACK_BASE_URL;
+      } catch (e2) {
+        return base;
+      }
     }
   });
 }
@@ -194,27 +215,40 @@ function decodeEntities(s) {
   }).replace(/&#x([0-9a-fA-F]+);/g, (_, hex) => String.fromCharCode(parseInt(hex, 16))).replace(/&amp;/g, "&").replace(/&quot;/g, '"').replace(/&lt;/g, "<").replace(/&gt;/g, ">");
 }
 function parseSearchResults(html) {
+  const src = String(html || "");
   const items = [];
   const seen = /* @__PURE__ */ new Set();
-  const liRe = /<li[^>]*class="film-item-ver"[^>]*>([\s\S]*?)<\/li>/gi;
+  const push = (href, name, year, isResult) => {
+    if (!href || seen.has(href))
+      return;
+    seen.add(href);
+    items.push({ href, name, year, isResult });
+  };
+  const itemRe = /<li[^>]*class="item(?:\s[^"]*)?"[^>]*>([\s\S]*?)<\/li>/gi;
   let m;
-  while ((m = liRe.exec(html)) !== null) {
+  while ((m = itemRe.exec(src)) !== null) {
     const block = m[1];
     const hrefM = block.match(/<a[^>]*href="(\/phim\/[^"]+)"/i);
     if (!hrefM)
       continue;
-    const href = hrefM[1];
-    if (seen.has(href))
+    const nameM = block.match(/<div[^>]*class="name"[^>]*>[\s\S]*?<span[^>]*>([\s\S]*?)<\/span>/i);
+    const name = decodeEntities(nameM ? nameM[1].replace(/<[^>]+>/g, "").trim() : "").trim();
+    if (name)
+      push(hrefM[1], name, "", true);
+  }
+  const verRe = /<li[^>]*class="film-item-ver"[^>]*>([\s\S]*?)<\/li>/gi;
+  while ((m = verRe.exec(src)) !== null) {
+    const block = m[1];
+    const hrefM = block.match(/<a[^>]*href="(\/phim\/[^"]+)"/i);
+    if (!hrefM)
       continue;
-    seen.add(href);
     const nameM = block.match(/<p[^>]*class="name"[^>]*>\s*<a[^>]*>([\s\S]*?)<\/a>/i);
     const yearM = block.match(/<p[^>]*class="real-name"[^>]*>([\s\S]*?)<\/p>/i);
     const name = decodeEntities(nameM ? nameM[1].replace(/<[^>]+>/g, "").trim() : "").trim();
     const yearRaw = decodeEntities(yearM ? yearM[1].replace(/<[^>]+>/g, "").trim() : "").trim();
     const year = /^\d{4}$/.test(yearRaw) ? yearRaw : "";
-    if (!name)
-      continue;
-    items.push({ href, name, year });
+    if (name)
+      push(hrefM[1], name, year, false);
   }
   return items;
 }
@@ -280,15 +314,10 @@ function pickCandidate(base, candidates, meta) {
   return __async(this, null, function* () {
     if (!candidates.length)
       return null;
-    const ranked = candidates.map((c) => ({
-      c,
-      score: slugScore(c.href, meta.title) + (meta.year && c.year === meta.year ? 2 : 0)
-    })).sort((a, b) => b.score - a.score).map((x) => x.c);
-    if (ranked.length && slugScore(ranked[0].href, meta.title) === 0 && !(meta.year && ranked[0].year === meta.year)) {
-      const anyYear = candidates.some((c) => meta.year && c.year === meta.year);
-      if (!anyYear)
-        return null;
-    }
+    const score = (c) => (c.isResult ? 3 : 0) + slugScore(c.href, meta.title) + (meta.year && c.year === meta.year ? 2 : 0);
+    const ranked = candidates.map((c) => ({ c, score: score(c) })).sort((a, b) => b.score - a.score).map((x) => x.c);
+    if (ranked.length && score(ranked[0]) === 0)
+      return null;
     const ordered = ranked.slice(0, CONFIG.MAX_VERIFY_CANDIDATES);
     if (meta.imdbId) {
       for (const c of ordered) {
@@ -336,8 +365,19 @@ function extractStreams(tmdbId, mediaType, season, episode) {
       console.warn(`[BluPhim] TMDB kh\xF4ng c\xF3 title cho ${mediaType} ${tmdbId}`);
       return [];
     }
-    const searchHtml = yield fetchText(`${base}/search?k=${encodeURIComponent(searchKeyword(meta.title))}`);
-    const candidates = parseSearchResults(searchHtml);
+    let candidates = [];
+    const maxScore = (list) => list.reduce((m, c) => {
+      const s = (c.isResult ? 3 : 0) + slugScore(c.href, meta.title) + (meta.year && c.year === meta.year ? 2 : 0);
+      return s > m ? s : m;
+    }, 0);
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const searchHtml = yield fetchText(
+        `${base}/search?k=${encodeURIComponent(searchKeyword(meta.title))}`
+      );
+      candidates = parseSearchResults(searchHtml);
+      if (candidates.length && (attempt === 2 || maxScore(candidates) > 0))
+        break;
+    }
     if (!candidates.length)
       return [];
     const picked = yield pickCandidate(base, candidates, meta);
@@ -354,13 +394,23 @@ function extractStreams(tmdbId, mediaType, season, episode) {
         return [];
       watchUrl = `${base + watchHref}/tap-${ep}`;
     }
-    const watchHtml = yield fetchText(watchUrl);
-    const iframeSrc = parseIframeSrc(watchHtml);
+    let watchHtml = yield fetchText(watchUrl);
+    let iframeSrc = parseIframeSrc(watchHtml);
+    if (/\/embed\?/i.test(iframeSrc) && !/embed3rd/i.test(iframeSrc)) {
+      const sv2 = `${watchUrl}${watchUrl.includes("?") ? "&" : "?"}sv2=true`;
+      try {
+        const html2 = yield fetchText(sv2);
+        const src2 = parseIframeSrc(html2);
+        if (src2) {
+          watchHtml = html2;
+          iframeSrc = src2;
+        }
+      } catch (e) {
+      }
+    }
     if (!iframeSrc)
       return [];
     const streamUrl = yield resolveEmbedStream(iframeSrc, watchUrl);
-    if (!streamUrl)
-      return [];
     let quality = "";
     try {
       const master = yield fetchText(streamUrl, { headers: { Referer: watchUrl } });

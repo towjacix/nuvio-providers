@@ -46,18 +46,34 @@ async function request(url, options = {}) {
         if (timer !== null) {
             try { clearTimeout(timer); } catch (e2) { /* noop */ }
         }
-        throw new Error((e && e.name === 'AbortError')
+        const msg = (e && e.name === 'AbortError')
             ? `timeout sau ${TIMEOUT_MS}ms`
-            : (e && e.message) || 'fetch error');
+            : (e && e.message) || 'fetch error';
+        const err = new Error(msg);
+        // Giữ HTTP status để tầng gọi phân biệt lỗi mạng (retry được) vs 4xx (không retry).
+        if (/^HTTP (\d+)/.test(msg)) err.status = Number(msg.match(/^HTTP (\d+)/)[1]);
+        throw err;
+    }
+}
+
+const RETRYABLE = (e) => !(e && e.status && e.status >= 400 && e.status < 500);
+
+/** Site chậm (~6s/hop) + hay reset kết nối → retry 1 lần ngay cho lỗi mạng/timeout. */
+async function requestWithRetry(url, options = {}) {
+    try {
+        return await request(url, options);
+    } catch (e) {
+        if (!RETRYABLE(e)) throw e;
+        return await request(url, options);
     }
 }
 
 export async function fetchJson(url, options = {}) {
-    const response = await request(url, options);
+    const response = await requestWithRetry(url, options);
     return await response.json();
 }
 
 export async function fetchText(url, options = {}) {
-    const response = await request(url, options);
+    const response = await requestWithRetry(url, options);
     return await response.text();
 }

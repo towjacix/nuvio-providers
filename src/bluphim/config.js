@@ -30,5 +30,6 @@ export const CONFIG = {
     TMDB_API_KEY: '1865f43a0549ca50d341dd9ab8b29f49',
 
     // Số ứng viên detail tối đa để verify imdb
-    MAX_VERIFY_CANDIDATES: 4,
+    // (search trả ~10 li.item thật; entry đúng hay đứng sau 4-5 tựa gần tên)
+    MAX_VERIFY_CANDIDATES: 10,
 };
