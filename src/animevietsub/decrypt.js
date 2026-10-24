@@ -1,34 +1,33 @@
 /**
- * AnimeVietSub decrypt pipeline — port nguyên văn từ h0dev/0cs3 AnimeVietsubProvider.
- * Runtime quickjs-kt KHÔNG có WebCrypto/atob/TextDecoder → mọi thứ thuần JS.
+ * AnimeVietSub decrypt pipeline — direct port from h0dev/0cs3 AnimeVietsubProvider.
+ * quickjs-kt runtime lacks WebCrypto/atob/TextDecoder → pure JS implementations.
  *
- * Pipeline CS3 (interceptor; Nuvio KHÔNG dùng được phần m3u8 trả về vì
- * stream item chỉ nhận URL — giữ đây để unit-test + tái dùng nếu sau này
- * app có cách inject playlist):
+ * CS3 pipeline (interceptor; Nuvio cannot deliver the decrypted m3u8 because
+ * stream items only accept URLs — kept for unit tests and potential playlist injection):
  *
  *   1. extractAvsToken(playerHtml): const avsToken = "..."(+"..."...)  → JWT
  *   2. playlistUrl = {playerBase}/playlist/{videoHash}/playlist.m3u8?token=JWT
  *   3. processEncryptedM3u8(m3u8Text, headers, avsToken):
- *      - jtiOdd = các ký tự vị trí lẻ của claim "jti" trong JWT
- *      - envelope từ header x-envelope|x-avs-envelope|x-stream-envelope
+ *      - jtiOdd = odd-indexed characters of "jti" claim in JWT
+ *      - envelope from header x-envelope|x-avs-envelope|x-stream-envelope
  *        (base64url "USDK\x01" + len16be + urlencoded JSON {cn,sk,ts,uid})
- *        hoặc headers x-edge-tag(cn)/x-cache-node(sk)/x-request-trace(ts)/
+ *        or headers x-edge-tag(cn)/x-cache-node(sk)/x-request-trace(ts)/
  *        x-proxy-digest(uid, urlencoded)
- *      - gom các giá trị ?..._t= trên dòng không-comment → concat
- *      - thử 2 unshuffle × 2 format HMAC data:
+ *      - collect ?..._t= values from non-comment lines → concat
+ *      - try 2 unshuffles × 2 HMAC data formats:
  *          data = uid:ts:sk:0  |  uid:ts:sk
  *          key  = HMAC-SHA256(key=cnBytes, data)
  *          body = AES-256-GCM(encryptedBlob, key, iv=cn[0..12], tag128)
- *        unshuffle: stringUnshuffle(s, sk) hoặc identity
- *      - nếu body không chứa "#EXTINF" và không chứa "/hls/" → descramble(raw, sk, ts)
- *      - ghép headerLines + body, đảm bảo #EXT-X-ENDLIST
+ *        unshuffle: stringUnshuffle(s, sk) or identity
+ *      - if body does not contain "#EXTINF" and does not contain "/hls/" → descramble(raw, sk, ts)
+ *      - merge headerLines + body, ensure #EXT-X-ENDLIST
  *   4. decryptM3u8SegmentUrls(text, jtiOdd):
- *      với mỗi dòng /hls/{24hex}.ts?e={b64url}&i={n}:
+ *      for each line /hls/{24hex}.ts?e={b64url}&i={n}:
  *          key = HMAC-SHA256(key=jtiOdd, "url-cipher|"+fileId)
- *          URL = AES-256-CTR(key, counter[16B, 4B cuối = i big-endian])(b64url(e))
- *      drop dòng urn:avs:shield và .ts còn lại chưa giải được.
- *   5. Segment thật có thể phủ vỏ PNG: bỏ prefix tới vị trí i sao cho
- *      byte[i + k*188] == 0x47 với k=1..7 (TS sync) — findAvsPngPrefixLength.
+ *          URL = AES-256-CTR(key, counter[16B, last 4B = i big-endian])(b64url(e))
+ *      drop urn:avs:shield and remaining unresolved .ts lines.
+ *   5. Real segments may have PNG wrapper: skip prefix up to byte i where
+ *      byte[i + k*188] == 0x47 for k=1..7 (TS sync) — findAvsPngPrefixLength.
  */
 
 // ---------- base64url / bytes ----------
@@ -233,7 +232,7 @@ function aesEncryptBlock(exp, input) {
     return s;
 }
 
-/** AES-CTR giải (encrypt == decrypt). counter = 16B, tăng big-endian từ vị trí 12..15 mỗi block. */
+/** AES-CTR decrypt (encrypt == decrypt). counter = 16B, increments big-endian at bytes 12..15 per block. */
 export function aesCtrCrypt(key, data, counter) {
     const exp = aesExpandKey(key);
     const ctr = counter.slice();
@@ -242,8 +241,7 @@ export function aesCtrCrypt(key, data, counter) {
         const ks = aesEncryptBlock(exp, ctr);
         const n = Math.min(16, data.length - off);
         for (let i = 0; i < n; i++) out[off + i] = data[off + i] ^ ks[i];
-        // tăng counter ở 4 byte cuối (Java AES/CTR tăng toàn bộ 128bit, nhưng
-        // segment decrypt của AVS chỉ đặt 4B cuối và đếm tuần tự → tăng BE 4B cuối đủ)
+        // Increment counter at last 4 bytes (AVS segment decrypt only sets and increments the last 4 bytes)
         for (let i = 15; i >= 0; i--) {
             ctr[i] = (ctr[i] + 1) & 0xff;
             if (ctr[i] !== 0) break;
@@ -255,7 +253,7 @@ export function aesCtrCrypt(key, data, counter) {
 // ---------- GCM ----------
 
 function ghash(hBytes, data) {
-    // GF(2^128) nhân; H là 16B
+    // GF(2^128) multiply; H is 16B
     const toLongs = (b) => [
         ((b[0] << 24) | (b[1] << 16) | (b[2] << 8) | b[3]) >>> 0,
         ((b[4] << 24) | (b[5] << 16) | (b[6] << 8) | b[7]) >>> 0,
@@ -264,7 +262,7 @@ function ghash(hBytes, data) {
     ];
     const H = toLongs(hBytes);
     const mul = (X, Y) => {
-        // X, Y: mảng 4 word 32-bit, MSB-first. Nhân GF(2^128) rồi giảm modulo poly GCM.
+        // X, Y: 4-word 32-bit arrays, MSB-first. Multiply in GF(2^128) then reduce modulo GCM polynomial.
         const z = [0, 0, 0, 0];
         let v = Y.slice();
         for (let i = 0; i < 128; i++) {
@@ -272,7 +270,7 @@ function ghash(hBytes, data) {
             if ((X[word] >>> bit) & 1) {
                 z[0] ^= v[0]; z[1] ^= v[1]; z[2] ^= v[2]; z[3] ^= v[3];
             }
-            // v = v >> 1, nếu LSB v trước = 1 thì v ^= R (0xe1<<120)
+            // v = v >> 1, if previous LSB was 1 then v ^= R (0xe1<<120)
             const carry = v[3] & 1;
             v[3] = (v[3] >>> 1) | ((v[2] & 1) << 31);
             v[2] = (v[2] >>> 1) | ((v[1] & 1) << 31);
@@ -321,7 +319,7 @@ function gcmTag(key, iv, ciphertext, aad) {
     if (iv.length === 12) {
         j0 = iv.concat([0, 0, 0, 1]);
     } else {
-        // IV khác 12B: J0 = GHASH(pad16(iv) || len64(ivbits))
+        // Non-12B IV: J0 = GHASH(pad16(iv) || len64(ivbits))
         j0 = ghash(H, pad16(iv).concat(len64be(iv.length * 8)));
     }
     const s = ghash(H, pad16(aad).concat(pad16(ciphertext))
@@ -330,7 +328,7 @@ function gcmTag(key, iv, ciphertext, aad) {
     return s.map((b, i) => b ^ eJ0[i]);
 }
 
-/** AES-GCM decrypt (tag 16B cuối data). Trả null nếu tag sai — giống cipher.doFinal throw. */
+/** AES-GCM decrypt (tag is last 16B). Returns null on tag mismatch. */
 export function aesGcmDecrypt(key, iv, blob) {
     if (blob.length < 16) return null;
     const ct = blob.slice(0, blob.length - 16);
@@ -339,9 +337,9 @@ export function aesGcmDecrypt(key, iv, blob) {
     for (let i = 0; i < 16; i++) {
         if ((expect[i] ^ tag[i]) !== 0) return null;
     }
-    // CTR từ J0+1 (Java GCM counter bắt đầu = J0 + 1)
+    // CTR from J0+1 (Java GCM counter starts at J0 + 1)
     const j0 = iv.length === 12 ? iv.concat([0, 0, 0, 2]) : null;
-    if (!j0) return null; // AVS luôn iv 12B
+    if (!j0) return null; // AVS always uses 12B IV
     return aesCtrCrypt(key, ct, j0);
 }
 
@@ -460,7 +458,7 @@ function jwtJtiOdd(token) {
     }
 }
 
-/** headers: {name: value} lowercase-keyed (mình chuẩn hóa trong http.js). */
+/** headers: lowercase-keyed {name: value} (normalized in http.js). */
 export function processEncryptedM3u8(m3u8Text, headers, avsToken) {
     const jtiOdd = jwtJtiOdd(avsToken);
     if (jtiOdd === null) return null;
@@ -481,7 +479,7 @@ export function processEncryptedM3u8(m3u8Text, headers, avsToken) {
     if (!sk) sk = hdr('x-cache-node');
     if (ts === '0') ts = hdr('x-request-trace') || '0';
     if (uid === 'anon' && hdr('x-proxy-digest')) {
-        try { uid = decodeURIComponent(hdr('x-proxy-digest')); } catch (e) { /* giữ anon */ }
+        try { uid = decodeURIComponent(hdr('x-proxy-digest')); } catch (e) { /* keep anon */ }
     }
     if (!cn || !sk) return null;
 
@@ -490,7 +488,7 @@ export function processEncryptedM3u8(m3u8Text, headers, avsToken) {
     for (const line of String(m3u8Text).split('\n')) {
         if (line.startsWith('#') || !line.trim()) {
             if (line.startsWith('#EXTINF:') || line.startsWith('#EXT-X-ENDLIST') || line.startsWith('#EXT-X-KEY')) {
-                // bỏ — phần body giải mã sẽ cung cấp
+                // Drop — provided by decrypted body
             } else {
                 headerLines.push(line);
             }
@@ -568,7 +566,7 @@ export function decryptM3u8SegmentUrls(text, jtiOdd) {
     }).join('\n');
 }
 
-/** Vị trí bắt đầu payload TS sau vỏ PNG (đầu file PNG rồi 8+ block sync 0x47 cách 188B). */
+/** Start position of TS payload after PNG header (PNG magic followed by 8+ sync bytes 0x47 spaced 188B apart). */
 export function findAvsPngPrefixLength(head) {
     if (head.length < 4 || head[0] !== 0x89 || head[1] !== 0x50 || head[2] !== 0x4e || head[3] !== 0x47) {
         return 0;

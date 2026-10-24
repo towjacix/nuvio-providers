@@ -1,6 +1,6 @@
 /**
  * bluphim - Built from src/bluphim/
- * Generated: 2026-10-24T16:09:33.886Z
+ * Generated: 2026-10-24T16:39:22.375Z
  */
 var __defProp = Object.defineProperty;
 var __defProps = Object.defineProperties;
@@ -52,11 +52,11 @@ var CONFIG = {
     Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
   },
   PROVIDER_NAME: "BluPhim",
-  // Metadata TMDB (title/year/imdbId) — app chỉ truyền tmdbId
+  // TMDB metadata (title/year/imdbId) — app only passes tmdbId
   TMDB_API_BASE: "https://api.themoviedb.org/3",
   TMDB_API_KEY: "1865f43a0549ca50d341dd9ab8b29f49",
-  // Số ứng viên detail tối đa để verify imdb
-  // (search trả ~10 li.item thật; entry đúng hay đứng sau 4-5 tựa gần tên)
+  // Max detail candidates to verify against imdb
+  // (search returns ~10 real li.item entries; correct one often sits behind 4-5 near-name titles)
   MAX_VERIFY_CANDIDATES: 10
 };
 
@@ -103,7 +103,7 @@ function request(_0) {
         } catch (e2) {
         }
       }
-      const msg = e && e.name === "AbortError" ? `timeout sau ${TIMEOUT_MS}ms` : e && e.message || "fetch error";
+      const msg = e && e.name === "AbortError" ? `timeout after ${TIMEOUT_MS}ms` : e && e.message || "fetch error";
       const err = new Error(msg);
       if (/^HTTP (\d+)/.test(msg))
         err.status = Number(msg.match(/^HTTP (\d+)/)[1]);
@@ -179,11 +179,11 @@ function resolveTmdbId(tmdbId, mediaType) {
   return __async(this, null, function* () {
     const raw = String(tmdbId || "").trim();
     if (!raw)
-      throw new Error("thi\u1EBFu tmdbId");
+      throw new Error("missing tmdbId");
     if (!IMDB_ID_RE.test(raw)) {
       const n = parseInt(raw, 10);
       if (!Number.isFinite(n))
-        throw new Error(`tmdbId l\u1EA1: ${raw}`);
+        throw new Error(`invalid tmdbId: ${raw}`);
       return n;
     }
     const kind = mediaType === "tv" ? "tv" : "movie";
@@ -191,7 +191,7 @@ function resolveTmdbId(tmdbId, mediaType) {
     const json = yield fetchJson(url);
     const list = json && Array.isArray(json[kind === "tv" ? "tv_results" : "movie_results"]) ? json[kind === "tv" ? "tv_results" : "movie_results"] : [];
     if (!list.length || typeof list[0].id !== "number") {
-      throw new Error(`kh\xF4ng resolve \u0111\u01B0\u1EE3c IMDB ${raw}`);
+      throw new Error(`could not resolve IMDB ${raw}`);
     }
     return list[0].id;
   });
@@ -308,7 +308,7 @@ function parseQuality(masterText) {
   return "";
 }
 function searchKeyword(title) {
-  return String(title || "").replace(/[^a-zA-Z0-9À-ỹ\s]/g, " ").replace(/\s+/g, " ").trim();
+  return String(title || "").replace(/[^a-zA-Z0-9\u00C0-\u1EF9\s]/g, " ").replace(/\s+/g, " ").trim();
 }
 function pickCandidate(base, candidates, meta) {
   return __async(this, null, function* () {
@@ -362,7 +362,7 @@ function extractStreams(tmdbId, mediaType, season, episode) {
     const numericId = yield resolveTmdbId(tmdbId, mediaType);
     const meta = yield tmdbMeta(numericId, mediaType);
     if (!meta.title) {
-      console.warn(`[BluPhim] TMDB kh\xF4ng c\xF3 title cho ${mediaType} ${tmdbId}`);
+      console.warn(`[BluPhim] TMDB has no title for ${mediaType} ${tmdbId}`);
       return [];
     }
     let candidates = [];

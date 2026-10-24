@@ -1,23 +1,23 @@
 /**
- * VidKing provider — nguồn Anh đa ngôn ngữ (backend SpeedRacelight, kế thừa Videasy/Cineby).
+ * VidKing provider — multi-language source (SpeedRacelight backend, Videasy/Cineby lineage).
  *
  * Flow:
  *   getStreams(tmdbId, mediaType, season, episode)
- *     ├─ TMDB API → title / year / imdbId           (mọi phim TMDB đều có metadata)
- *     ├─ api.speedracelight.com/seed?mediaId=…      → seed (TTL 30s, cache 25s)
- *     ├─ /cdn/sources-with-title?...&seed=…&_t=…    → payload base64url (mã hoá XOR)
- *     ├─ decrypt XOR (magic "mvm1")                 → { sources[], subtitles[] }
+ *     ├─ TMDB API → title / year / imdbId           (every TMDB title has metadata)
+ *     ├─ api.speedracelight.com/seed?mediaId=…      → seed (TTL 30s, cached 25s)
+ *     ├─ /cdn/sources-with-title?...&seed=…&_t=…    → base64url payload (XOR-encrypted)
+ *     ├─ XOR decrypt (magic "mvm1")                 → { sources[], subtitles[] }
  *     └─ map → items { title, url, type:'hls', headers, subtitles[] }
  *
- * Video segments public (không cần headers), sub VTT cần Referer vidking.
+ * Video segments are public (no headers); VTT subs require vidking Referer.
  */
 
 export const CONFIG = {
-    // Backend stream (SpeedRacelight — cùng hạ tầng cineby/videasy-vidking)
+    // Stream backend (SpeedRacelight — same infra as cineby/videasy-vidking)
     SPEED_API: 'https://api.speedracelight.com',
     SUBS_API: 'https://subs.videasy.to',
 
-    // Referer bắt buộc khi tải VTT sub từ moon.peakstorm.top (403 nếu thiếu)
+    // Referer required to fetch VTT subs from moon.peakstorm.top (403 without it)
     REFERER: 'https://www.vidking.net/',
 
     HEADERS: {
@@ -27,13 +27,13 @@ export const CONFIG = {
 
     PROVIDER_NAME: 'VidKing',
 
-    // Metadata TMDB (title/year/imdbId) — app chỉ truyền tmdbId
+    // TMDB metadata (title/year/imdbId) — app only passes tmdbId
     TMDB_API_BASE: 'https://api.themoviedb.org/3',
     TMDB_API_KEY: '1865f43a0549ca50d341dd9ab8b29f49',
 
-    // Seed cache: TTL server 30s → cache 25s (tránh retry seed-invalid)
+    // Seed cache: server TTL 30s → cache 25s (avoids seed-invalid retries)
     SEED_TTL_MS: 25000,
 
-    // Giới hạn sub gắn vào item (JSON nhẹ, dedupe url)
+    // Cap on subs attached to each item (light JSON, dedupe by url)
     MAX_SUBTITLES: 12,
 };

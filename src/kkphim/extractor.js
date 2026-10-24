@@ -3,7 +3,7 @@ import { fetchJson, fetchText } from './http.js';
 
 let cachedBaseUrl = null;
 
-/** Bỏ suffix /v1/api để về root legacy endpoint. */
+/** Strip /v1/api suffix to reach legacy root endpoint. */
 export function normalizeBaseUrl(raw) {
     const m = String(raw || '').trim().match(/^https?:\/\/[^\s]+/);
     if (!m) return null;
@@ -11,8 +11,8 @@ export function normalizeBaseUrl(raw) {
 }
 
 /**
- * Resolve base URL động từ TXT; TXT lỗi hoặc base mới probe fail → fallback BASE_URL.
- * Probe chỉ chạy khi TXT trả domain khác hardcode (nếu bằng thì skip → 0 extra request).
+ * Dynamically resolve base URL from TXT; fallback to BASE_URL on TXT error or failed probe.
+ * Probe only runs if TXT returns a domain different from hardcoded BASE_URL (skips extra requests otherwise).
  */
 export async function resolveBaseUrl() {
     if (cachedBaseUrl) return cachedBaseUrl;
@@ -20,7 +20,7 @@ export async function resolveBaseUrl() {
     let base = null;
     try {
         base = normalizeBaseUrl(await fetchText(CONFIG.DOMAIN_TXT_URL));
-    } catch (e) { /* fallback hardcode */ }
+    } catch (e) { /* fallback to hardcoded BASE_URL */ }
     if (!base) base = CONFIG.BASE_URL;
 
     if (base === CONFIG.BASE_URL) {
@@ -37,7 +37,7 @@ export async function resolveBaseUrl() {
     return cachedBaseUrl;
 }
 
-/** Reset cache (chỉ dùng trong unit test). */
+/** Reset cache (unit tests only). */
 export function resetBaseUrlCache() {
     cachedBaseUrl = null;
 }
@@ -52,24 +52,24 @@ const QUALITY_MAP = {
 
 const IMDB_ID_RE = /^tt\d+$/i;
 
-/** Số nguyên giữ nguyên; IMDB "tt..." → TMDB Find API. throw nếu không resolve được. */
+/** Keep numeric IDs as-is; resolve IMDB "tt..." via TMDB Find API. Throws on failure. */
 export async function resolveTmdbId(tmdbId, mediaType) {
     const raw = String(tmdbId || '').split(':')[0].trim();
     if (/^\d+$/.test(raw)) return raw;
-    if (!IMDB_ID_RE.test(raw)) throw new Error(`id không hợp lệ: "${raw}"`);
+    if (!IMDB_ID_RE.test(raw)) throw new Error(`invalid id: "${raw}"`);
 
     const url = `${CONFIG.TMDB_API_BASE}/find/${raw}?api_key=${CONFIG.TMDB_API_KEY}&external_source=imdb_id`;
     const data = await fetchJson(url);
     const results = mediaType === 'movie' ? data.movie_results : data.tv_results;
     const id = Array.isArray(results) && results[0] && results[0].id;
-    if (!id) throw new Error(`không resolve được TMDB id từ "${raw}"`);
+    if (!id) throw new Error(`could not resolve TMDB id from "${raw}"`);
     return String(id);
 }
 
-const PHAN_NAME_RE = /\(Phần\s*(\d+)\)/i;
+const PHAN_NAME_RE = /\(Ph\u1ea7n\s*(\d+)\)/i;
 const PHAN_SLUG_RE = /-phan-(\d+)$/i;
 
-/** Đọc số Phần từ tên/slug KKPhim. Không marker → Phần 1. */
+/** Extract part number from KKPhim name or slug. Defaults to 1 if no marker. */
 export function parsePhan(item) {
     const name = (item && item.name) || '';
     const slug = (item && item.slug) || '';
@@ -79,12 +79,12 @@ export function parsePhan(item) {
 
 export function seasonKeyword(name) {
     return String(name || '')
-        .replace(/\s*\(Phần\s*\d+\)\s*$/i, '')
+        .replace(/\s*\(Ph\u1ea7n\s*\d+\)\s*$/i, '')
         .replace(/\s*\(Season\s*\d+\)\s*$/i, '')
         .trim();
 }
 
-/** Search tên VN → tìm item "Phần N" phù hợp trên KKPhim. */
+/** Search by Vietnamese title → find matching "Part N" item on KKPhim. */
 export async function searchSeasonFallback(movie, season, episode, options, base) {
     const keyword = seasonKeyword(movie && movie.name);
     if (!keyword) return [];
@@ -117,9 +117,9 @@ const absolutizeUrl = (segUrl, playUrl) => {
     }
     return playUrl.slice(0, playUrl.lastIndexOf('/') + 1) + segUrl;
 };
-// REFERENCE-ONLY: port InterceptorUtilKt.removeAdsKKphim (CloudStream) để drop block DISCONTINUITY
-// có /v7/|/v8/+segment_|/adjump/. KHÔNG còn dùng trong đường play — app không mở được data: URI
-// (ExoPlayer ParserException + libmpv end-file). Giữ làm reference chuẩn cho ad-filter app-side.
+// REFERENCE-ONLY: ported from InterceptorUtilKt.removeAdsKKphim (CloudStream) to drop DISCONTINUITY blocks
+// containing /v7/|/v8/+segment_|/adjump/. Unused in playback path — app cannot open data: URIs
+// (ExoPlayer ParserException + libmpv end-file). Kept as canonical reference for app-side ad filtering.
 export function removeAdsFromPlaylist(playlist, playUrl) {
     const out = [];
     let block = [];
@@ -169,7 +169,7 @@ export function removeAdsFromPlaylist(playlist, playUrl) {
 }
 
 
-/** /tmdb 404 → lấy title EN từ TMDB API → search /tim-kiem → verify candidate. */
+/** Fallback on /tmdb 404: fetch EN title from TMDB API → search /tim-kiem → verify candidates. */
 export async function titleSearchFallback(resolved, mediaType, season, episode, options, base) {
     const info = await fetchJson(`${CONFIG.TMDB_API_BASE}/${mediaType}/${resolved}?api_key=${CONFIG.TMDB_API_KEY}`);
     const name = mediaType === 'movie' ? info.title : info.name;
@@ -214,7 +214,7 @@ export async function titleSearchFallback(resolved, mediaType, season, episode, 
     return [];
 }
 
-/** Entry point: fetch /tmdb → map streams; retry timeout, fallback tên VN, fallback title EN. */
+/** Entry point: fetch /tmdb → map streams; retry on timeout, fallback to VN title, then TMDB EN title. */
 export async function extractStreams(tmdbId, mediaType, season, episode, options = {}) {
     const resolved = await resolveTmdbId(tmdbId, mediaType);
     const base = await resolveBaseUrl();
@@ -236,10 +236,10 @@ export async function extractStreams(tmdbId, mediaType, season, episode, options
         try {
             streams = await searchSeasonFallback(data.movie, season, episode, options, base);
             if (streams.length) {
-                console.warn(`[KKPhim] TV ${resolved}: fallback theo tên VN lấy được ${streams.length} streams cho Season ${season}.`);
+                console.warn(`[KKPhim] TV ${resolved}: Vietnamese title fallback resolved ${streams.length} streams for Season ${season}.`);
             }
         } catch (e) {
-            console.warn(`[KKPhim] TV ${resolved}: fallback search lỗi: ${e.message}`);
+            console.warn(`[KKPhim] TV ${resolved}: search fallback error: ${e.message}`);
         }
     }
 
@@ -247,10 +247,10 @@ export async function extractStreams(tmdbId, mediaType, season, episode, options
         try {
             streams = await titleSearchFallback(resolved, mediaType, season, episode, options, base);
             if (streams.length) {
-                console.warn(`[KKPhim] ${mediaType} ${resolved}: không có tag tmdb trên KKPhim, tìm theo title -> ${streams.length} streams.`);
+                console.warn(`[KKPhim] ${mediaType} ${resolved}: missing TMDB tag on KKPhim, matched by title -> ${streams.length} streams.`);
             }
         } catch (e) {
-            console.warn(`[KKPhim] ${mediaType} ${resolved}: title fallback lỗi: ${e.message}`);
+            console.warn(`[KKPhim] ${mediaType} ${resolved}: title fallback error: ${e.message}`);
         }
     }
 
@@ -275,8 +275,8 @@ export function toStreams(data, mediaType, season, episode, options = {}) {
     if (mediaType === 'tv' && tmdbSeason != null && Number(season) !== tmdbSeason) {
         if (strictSeason) {
             console.warn(
-                `[KKPhim] TV ${movie.tmdb ? movie.tmdb.id : '?'}: yêu cầu Season ${season} ` +
-                `nhưng item /tmdb chỉ có Season ${tmdbSeason} -> thử tìm item Phần ${season} theo tên...`
+                `[KKPhim] TV ${movie.tmdb ? movie.tmdb.id : '?'}: requested Season ${season} ` +
+                `but /tmdb item only has Season ${tmdbSeason} -> attempting title fallback...`
             );
             return [];
         }
@@ -307,9 +307,9 @@ export function toStreams(data, mediaType, season, episode, options = {}) {
                 title: buildTitle(ep, server, isMovie ? null : labelFor(tmdbSeason, season, strictSeason)),
                 url,
                 quality: parseQuality(ep.filename, movie.quality),
-                // headers phòng hờ: plugin runtime chỉ giữ item["headers"] top-level →
-                // player mang UA/Accept khi CDN bật chặn non-browser. KHÔNG thêm
-                // Referer/Origin (sai host có thể khiến CDN đang chạy tốt trả 403).
+                // Precautionary headers: plugin runtime only preserves top-level item["headers"] →
+                // player includes UA/Accept if CDN blocks non-browser traffic. Do NOT add
+                // Referer/Origin (mismatched host can cause working CDNs to return 403).
                 headers: {
                     'User-Agent': CONFIG.HEADERS['User-Agent'],
                     Accept: '*/*',
@@ -319,7 +319,7 @@ export function toStreams(data, mediaType, season, episode, options = {}) {
 
     });
     if (!isMovie && streams.length === 0) {
-        console.warn(`[KKPhim] TV ${movie.tmdb ? movie.tmdb.id : '?'}: không có stream cho S${season}E${episode} (KKPhim đang giữ S${tmdbSeason ?? '?'}).`);
+        console.warn(`[KKPhim] TV ${movie.tmdb ? movie.tmdb.id : '?'}: no streams for S${season}E${episode} (KKPhim has S${tmdbSeason ?? '?'}).`);
     }
 
     return streams;
@@ -328,7 +328,7 @@ export function toStreams(data, mediaType, season, episode, options = {}) {
 function labelFor(tmdbSeason, season, strictSeason) {
     if (strictSeason) return null;
     if (tmdbSeason == null || Number(season) === tmdbSeason) return null;
-    return `[Phần ${tmdbSeason}]`;
+    return `[Ph\u1ea7n ${tmdbSeason}]`;
 }
 
 function buildTitle(ep, server, label) {

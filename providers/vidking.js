@@ -1,6 +1,6 @@
 /**
  * vidking - Built from src/vidking/
- * Generated: 2026-09-10T14:29:02.128Z
+ * Generated: 2026-10-24T16:39:03.789Z
  */
 var __defProp = Object.defineProperty;
 var __defProps = Object.defineProperties;
@@ -44,22 +44,22 @@ var __async = (__this, __arguments, generator) => {
 
 // src/vidking/config.js
 var CONFIG = {
-  // Backend stream (SpeedRacelight — cùng hạ tầng cineby/videasy-vidking)
+  // Stream backend (SpeedRacelight — same infra as cineby/videasy-vidking)
   SPEED_API: "https://api.speedracelight.com",
   SUBS_API: "https://subs.videasy.to",
-  // Referer bắt buộc khi tải VTT sub từ moon.peakstorm.top (403 nếu thiếu)
+  // Referer required to fetch VTT subs from moon.peakstorm.top (403 without it)
   REFERER: "https://www.vidking.net/",
   HEADERS: {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
     Accept: "*/*"
   },
   PROVIDER_NAME: "VidKing",
-  // Metadata TMDB (title/year/imdbId) — app chỉ truyền tmdbId
+  // TMDB metadata (title/year/imdbId) — app only passes tmdbId
   TMDB_API_BASE: "https://api.themoviedb.org/3",
   TMDB_API_KEY: "1865f43a0549ca50d341dd9ab8b29f49",
-  // Seed cache: TTL server 30s → cache 25s (tránh retry seed-invalid)
+  // Seed cache: server TTL 30s → cache 25s (avoids seed-invalid retries)
   SEED_TTL_MS: 25e3,
-  // Giới hạn sub gắn vào item (JSON nhẹ, dedupe url)
+  // Cap on subs attached to each item (light JSON, dedupe by url)
   MAX_SUBTITLES: 12
 };
 
@@ -106,7 +106,7 @@ function request(_0) {
         } catch (e2) {
         }
       }
-      throw new Error(e && e.name === "AbortError" ? `timeout sau ${TIMEOUT_MS}ms` : e && e.message || "fetch error");
+      throw new Error(e && e.name === "AbortError" ? `timeout after ${TIMEOUT_MS}ms` : e && e.message || "fetch error");
     }
   });
 }
@@ -314,7 +314,7 @@ function fetchSeed(mediaId) {
     const json = yield fetchJson(`${CONFIG.SPEED_API}/seed?mediaId=${encodeURIComponent(String(mediaId))}`);
     const seed = json && typeof json.seed === "string" && json.seed.length ? json.seed : null;
     if (!seed) {
-      throw new Error("seed r\u1ED7ng t\u1EEB SpeedRacelight");
+      throw new Error("empty seed from SpeedRacelight");
     }
     seedCache = { value: seed, at: now };
     return seed;
@@ -333,7 +333,7 @@ function tmdbMeta(tmdbId, mediaType) {
       const list = type === "tv" ? find.tv_results || [] : find.movie_results || [];
       info = list[0];
       if (!info) {
-        console.warn(`[VidKing] TMDB find kh\xF4ng c\xF3 k\u1EBFt qu\u1EA3 cho IMDB ${rawId}`);
+        console.warn(`[VidKing] TMDB find returned no result for IMDB ${rawId}`);
         return { title: "", year: "", imdbId: rawId };
       }
     } else {
@@ -424,7 +424,7 @@ function subsFromVideasy(imdbId) {
       }
       return out;
     } catch (e) {
-      console.warn(`[VidKing] subs.videasy fallback l\u1ED7i: ${e && e.message ? e.message : String(e)}`);
+      console.warn(`[VidKing] subs.videasy fallback failed: ${e && e.message ? e.message : String(e)}`);
       return [];
     }
   });
@@ -459,7 +459,7 @@ function extractStreams(tmdbId, mediaType, season, episode) {
       return [];
     const meta = yield tmdbMeta(tmdbId, mediaType);
     if (!meta.title) {
-      console.warn(`[VidKing] TMDB kh\xF4ng c\xF3 title cho ${mediaType} ${tmdbId}`);
+      console.warn(`[VidKing] TMDB has no title for ${mediaType} ${tmdbId}`);
       return [];
     }
     const numericId = meta.tmdbNumericId || tmdbId;

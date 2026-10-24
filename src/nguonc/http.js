@@ -3,12 +3,12 @@ import { CONFIG } from './config.js';
 const TIMEOUT_MS = 15000;
 
 /**
- * Fetch với timeout TÙY MÔI TRƯỜNG (giống kkphim):
- * - Node (test/e2e): có setTimeout/clearTimeout → abort sau 15s.
- * - Runtime app Nuvio (quickjs-kt): KHÔNG inject setTimeout → gọi nó = TypeError chết trước
- *   fetch. __native_fetch chạy ĐỒNG BỘ (runBlocking) nên timer JS không bao giờ kịp abort —
- *   bỏ hẳn timer khi không có sẵn.
- * Mọi lỗi !ok → throw "HTTP {status} for {url}".
+ * Environment-dependent fetch timeout (same as kkphim):
+ * - Node (test/e2e): has setTimeout/clearTimeout → abort after 15s.
+ * - Nuvio app runtime (quickjs-kt): setTimeout is NOT injected → calling it throws
+ *   TypeError before fetch. __native_fetch runs synchronously (runBlocking) so a JS timer
+ *   never fires in time anyway — omit the timer when unavailable.
+ * Any !ok response → throw "HTTP {status} for {url}".
  */
 async function request(url, options = {}) {
     const hasTimers = typeof setTimeout === 'function' && typeof clearTimeout === 'function';
@@ -49,7 +49,7 @@ async function request(url, options = {}) {
             try { clearTimeout(timer); } catch (e2) { /* noop */ }
         }
         throw new Error((e && e.name === 'AbortError')
-            ? `timeout sau ${TIMEOUT_MS}ms`
+            ? `timeout after ${TIMEOUT_MS}ms`
             : (e && e.message) || 'fetch error');
     }
 }

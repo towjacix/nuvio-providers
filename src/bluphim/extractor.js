@@ -1,14 +1,14 @@
 import { CONFIG } from './config.js';
 import { fetchJson, fetchText } from './http.js';
 
-/** Cache base URL (domain đổi hiếm; test reset qua resetBaseUrlCache). */
+/** Cached base URL (domain changes rarely; tests reset via resetBaseUrlCache). */
 let cachedBaseUrl = null;
 
 export function resetBaseUrlCache() {
     cachedBaseUrl = null;
 }
 
-/** Chuẩn hoá domain lấy từ TXT (dòng đầu, trim slash). */
+/** Normalize domain read from TXT (first line, trim trailing slash). */
 export function normalizeBaseUrl(raw) {
     const m = String(raw || '').trim().match(/^https?:\/\/[^\s"'<>]+/);
     if (!m) return null;
@@ -16,9 +16,9 @@ export function normalizeBaseUrl(raw) {
 }
 
 /**
- * Resolve base URL động từ bluphim.txt (pattern kkphim):
- * TXT trả domain live (hiện = https://freetube.com.mx). TXT lỗi → BASE_URL,
- * probe fail → FALLBACK_BASE_URL.
+ * Dynamically resolve base URL from bluphim.txt (kkphim pattern):
+ * TXT yields live domain (currently https://freetube.com.mx). TXT error → BASE_URL;
+ * probe failure → FALLBACK_BASE_URL.
  */
 export async function resolveBaseUrl() {
     if (cachedBaseUrl) return cachedBaseUrl;
@@ -32,8 +32,8 @@ export async function resolveBaseUrl() {
     }
     if (!base) base = CONFIG.BASE_URL;
 
-    // Chỉ cache khi probe thành công. Fail → thử fallback cho request NÀY,
-    // nhưng KHÔNG lưu (site hay reset kết nối, lần sau phải thử lại domain chính).
+    // Only cache when probe succeeds. On failure try fallback for THIS request,
+    // but do NOT cache it (site often resets connections; next call must re-probe primary).
     try {
         await fetchText(base + '/');
         cachedBaseUrl = base;
@@ -50,13 +50,13 @@ export async function resolveBaseUrl() {
 
 const IMDB_ID_RE = /^tt\d+$/i;
 
-/** Số nguyên giữ nguyên; IMDB "tt..." → TMDB Find API. throw nếu không resolve được. */
+/** Keep numeric IDs as-is; resolve IMDB "tt..." via TMDB Find API. Throws on failure. */
 export async function resolveTmdbId(tmdbId, mediaType) {
     const raw = String(tmdbId || '').trim();
-    if (!raw) throw new Error('thiếu tmdbId');
+    if (!raw) throw new Error('missing tmdbId');
     if (!IMDB_ID_RE.test(raw)) {
         const n = parseInt(raw, 10);
-        if (!Number.isFinite(n)) throw new Error(`tmdbId lạ: ${raw}`);
+        if (!Number.isFinite(n)) throw new Error(`invalid tmdbId: ${raw}`);
         return n;
     }
     const kind = mediaType === 'tv' ? 'tv' : 'movie';
@@ -66,12 +66,12 @@ export async function resolveTmdbId(tmdbId, mediaType) {
     const list = (json && Array.isArray(json[kind === 'tv' ? 'tv_results' : 'movie_results']))
         ? json[kind === 'tv' ? 'tv_results' : 'movie_results'] : [];
     if (!list.length || typeof list[0].id !== 'number') {
-        throw new Error(`không resolve được IMDB ${raw}`);
+        throw new Error(`could not resolve IMDB ${raw}`);
     }
     return list[0].id;
 }
 
-/** Metadata TMDB: title gốc, năm, imdbId. */
+/** TMDB metadata: original title, year, imdbId. */
 export async function tmdbMeta(numericId, mediaType) {
     const kind = mediaType === 'tv' ? 'tv' : 'movie';
     const url = `${CONFIG.TMDB_API_BASE}/${kind}/${numericId}` +
@@ -85,7 +85,7 @@ export async function tmdbMeta(numericId, mediaType) {
     return { title, year, imdbId };
 }
 
-/** Decode HTML entities số (&#226;) + vài named cơ bản trong title site. */
+/** Decode numeric (&#226;) and common named HTML entities in site titles. */
 export function decodeEntities(s) {
     return String(s || '')
         .replace(/&#(\d+);/g, (_, code) => {
@@ -97,11 +97,11 @@ export function decodeEntities(s) {
 }
 
 /**
- * Parse kết quả search → {href, name, year}.
- * Kết quả THẬT nằm trong `li.item` (div.name > span, KHÔNG có năm).
- * `li.film-item-ver` là widget "phim mới" ở cuối trang — CHỈ dùng làm fallback
- * (CS3 cũng bốc film-item-ver, nhưng ở trang search đó là danh sách phụ).
- * year: film-item-ver có .real-name; item không có → ''.
+ * Parse search results → {href, name, year}.
+ * True search hits live in `li.item` (div.name > span, no year).
+ * `li.film-item-ver` is a "recent movies" widget at the bottom — fallback ONLY
+ * (CS3 also scraped film-item-ver, but on the search page that is just a secondary list).
+ * year: film-item-ver has .real-name; item does not → ''.
  */
 export function parseSearchResults(html) {
     const src = String(html || '');
@@ -113,8 +113,8 @@ export function parseSearchResults(html) {
         items.push({ href, name, year, isResult });
     };
 
-    // 1) Kết quả thật: <li class="item ..."> — "item" hoặc "item" + class phụ
-    //    (grid thêm "no-margin-left" mỗi hàng; KHÔNG khớp menu-item/sub-menu-item).
+    // 1) True results: <li class="item ..."> — "item" or "item" with extra class
+    //    (grid appends "no-margin-left" each row; avoids matching menu-item/sub-menu-item).
     const itemRe = /<li[^>]*class="item(?:\s[^"]*)?"[^>]*>([\s\S]*?)<\/li>/gi;
     let m;
     while ((m = itemRe.exec(src)) !== null) {
@@ -126,7 +126,7 @@ export function parseSearchResults(html) {
         if (name) push(hrefM[1], name, '', true);
     }
 
-    // 2) Fallback: film-item-ver (widget "phim mới" / layout cũ) — isResult=false.
+    // 2) Fallback: film-item-ver ("recent movies" widget / legacy layout) — isResult=false.
     const verRe = /<li[^>]*class="film-item-ver"[^>]*>([\s\S]*?)<\/li>/gi;
     while ((m = verRe.exec(src)) !== null) {
         const block = m[1];
@@ -142,19 +142,19 @@ export function parseSearchResults(html) {
     return items;
 }
 
-/** imdb.com/title/tt... trong trang detail. */
+/** Extract imdb.com/title/tt... from detail page. */
 export function parseDetailImdb(html) {
     const m = String(html || '').match(/imdb\.com\/title\/(tt\d+)/i);
     return m ? m[1] : '';
 }
 
-/** Link xem phim đầu tiên: a[href^=/xem-phim/]. */
+/** First watch link: a[href^=/xem-phim/]. */
 export function parseWatchHref(html) {
     const m = String(html || '').match(/href="(\/xem-phim\/[^"]+)"/i);
     return m ? m[1] : '';
 }
 
-/** Iframe player: iframe#iframeStream[src] (entity &amp; → &). */
+/** Player iframe: iframe#iframeStream[src] (entity &amp; → &). */
 export function parseIframeSrc(html) {
     const m = String(html || '').match(/<iframe[^>]*id="iframeStream"[^>]*src="([^"]+)"/i)
         || String(html || '').match(/<iframe[^>]*src="([^"]+)"[^>]*id="iframeStream"/i);
@@ -162,14 +162,14 @@ export function parseIframeSrc(html) {
     return decodeEntities(m[1]).replace(/&amp;/g, '&');
 }
 
-/** Iframe lồng nhau trong trang embed (embedIframe → streaming3rd). */
+/** Nested iframe inside embed page (embedIframe → streaming3rd). */
 export function parseNestedIframeSrc(html) {
     const m = String(html || '').match(/<iframe[^>]*src='([^']+)'/i)
         || String(html || '').match(/<iframe[^>]*src="([^"]+streaming[^"]*)"/i);
     return m ? m[1].replace(/&amp;/g, '&') : '';
 }
 
-/** URL m3u8 trong trang streaming: var url = '...m3u8'. */
+/** Extract m3u8 URL from streaming page: var url = '...m3u8'. */
 export function parseStreamUrl(html) {
     const m = String(html || '').match(/var\s+url\s*=\s*['"](https?:\/\/[^'"]+\.m3u8[^'"]*)['"]/i)
         || String(html || '').match(/(https?:\/\/[^'"\\\s]+\.m3u8[^'"\\\s]*)/i);
@@ -178,7 +178,7 @@ export function parseStreamUrl(html) {
 
 const TITLE_STOPWORDS = new Set(['the', 'a', 'an', 'of', 'and', 'vs']);
 
-/** Điểm khớp slug với title TMDB (site search trả lan man, cần xếp hạng trước khi verify). */
+/** Match score between slug and TMDB title (site search returns broad noise; rank before verify). */
 export function slugScore(href, title) {
     const slugM = String(href || '').match(/\/phim\/([a-z0-9-]+?)(?:-\d+)?$/i);
     if (!slugM) return 0;
@@ -192,7 +192,7 @@ export function slugScore(href, title) {
     return score;
 }
 
-/** Chất lượng từ master playlist (RESOLUTION cao nhất → 2160p/1080p/720p/480p). */
+/** Highest stream resolution from master playlist (2160p/1080p/720p/480p). */
 export function parseQuality(masterText) {
     let maxH = 0;
     const re = /RESOLUTION=\d+x(\d+)/gi;
@@ -209,21 +209,21 @@ export function parseQuality(masterText) {
 }
 
 
-/** Site search gãy với dấu câu (vd "Avengers: Endgame" → trả rác): chỉ giữ chữ/số/khoảng trắng. */
+/** Site search breaks on punctuation (e.g. "Avengers: Endgame" returns noise): keep only alphanumeric and whitespace. */
 export function searchKeyword(title) {
-    return String(title || '').replace(/[^a-zA-Z0-9À-ỹ\s]/g, ' ').replace(/\s+/g, ' ').trim();
+    return String(title || '').replace(/[^a-zA-Z0-9\u00C0-\u1EF9\s]/g, ' ').replace(/\s+/g, ' ').trim();
 }
 
 export async function pickCandidate(base, candidates, meta) {
     if (!candidates.length) return null;
-    // isResult (li.item = kết quả thật) +3 — sidebar film-item-ver khớp year cũng chỉ đạt 2.
+    // isResult (li.item = true hit) +3 — sidebar film-item-ver matching year reaches at most 2.
     const score = (c) => (c.isResult ? 3 : 0) + slugScore(c.href, meta.title)
         + (meta.year && c.year === meta.year ? 2 : 0);
     const ranked = candidates
         .map((c) => ({ c, score: score(c) }))
         .sort((a, b) => b.score - a.score)
         .map((x) => x.c);
-    // Toàn rác (không ai khớp slug lẫn năm) → bỏ, tránh verify vô ích.
+    // Pure noise (no candidate matches slug or year) → drop early to avoid wasted verification.
     if (ranked.length && score(ranked[0]) === 0) return null;
     const ordered = ranked.slice(0, CONFIG.MAX_VERIFY_CANDIDATES);
 
@@ -235,7 +235,7 @@ export async function pickCandidate(base, candidates, meta) {
                 if (imdb && meta.imdbId && imdb.toLowerCase() === meta.imdbId.toLowerCase()) {
                     return c;
                 }
-            } catch (e) { /* thử ứng viên tiếp */ }
+            } catch (e) { /* try next candidate */ }
         }
         return null;
     }
@@ -243,7 +243,7 @@ export async function pickCandidate(base, candidates, meta) {
 }
 
 
-/** Theo chuỗi embed (tối đa 2 hop) tới trang chứa var url m3u8. */
+/** Follow embed chain (up to 2 hops) to the page hosting var url m3u8. */
 export async function resolveEmbedStream(iframeSrc, referer) {
     let html = await fetchText(iframeSrc, { headers: { Referer: referer } });
     for (let hop = 0; hop < 2; hop += 1) {
@@ -260,7 +260,7 @@ export async function resolveEmbedStream(iframeSrc, referer) {
 
 /**
  * Entry point: TMDB meta → site search → verify imdb → watch → embed → m3u8.
- * TV thiếu episode → [] (không biết tập nào).
+ * TV requires episode number; returns [] if missing.
  */
 export async function extractStreams(tmdbId, mediaType, season, episode) {
     if (!tmdbId) return [];
@@ -271,12 +271,12 @@ export async function extractStreams(tmdbId, mediaType, season, episode) {
     const numericId = await resolveTmdbId(tmdbId, mediaType);
     const meta = await tmdbMeta(numericId, mediaType);
     if (!meta.title) {
-        console.warn(`[BluPhim] TMDB không có title cho ${mediaType} ${tmdbId}`);
+        console.warn(`[BluPhim] TMDB has no title for ${mediaType} ${tmdbId}`);
         return [];
     }
 
-    // Search site hay trả rác ("phim mới cập nhật") thay vì kết quả — retry tối đa 3 lần
-    // nếu không có ứng viên nào, hoặc không ai khớp slug/năm với meta.
+    // Site search often returns "recent updates" instead of query hits — retry up to 3 times
+    // if no candidates returned, or none match slug/year against meta.
     let candidates = [];
     const maxScore = (list) => list.reduce((m, c) => {
         const s = (c.isResult ? 3 : 0) + slugScore(c.href, meta.title)
@@ -308,16 +308,16 @@ export async function extractStreams(tmdbId, mediaType, season, episode) {
 
     let watchHtml = await fetchText(watchUrl);
     let iframeSrc = parseIframeSrc(watchHtml);
-    // Server mặc định = moviking /embed (FingerprintJS + WebGL + anti-devtools
-    // — không tái tạo trong quickjs). Server 3rd = /embed3rd (không fingerprint)
-    // qua ?sv2=true. Chỉ ép sv2 khi iframe đang là /embed trần.
+    // Default server = moviking /embed (FingerprintJS + WebGL + anti-devtools — cannot replicate
+    // in quickjs). Server 3rd = /embed3rd (no fingerprint) via ?sv2=true. Only force sv2 when
+    // iframe is bare /embed.
     if (/\/embed\?/i.test(iframeSrc) && !/embed3rd/i.test(iframeSrc)) {
         const sv2 = `${watchUrl}${watchUrl.includes('?') ? '&' : '?'}sv2=true`;
         try {
             const html2 = await fetchText(sv2);
             const src2 = parseIframeSrc(html2);
             if (src2) { watchHtml = html2; iframeSrc = src2; }
-        } catch (e) { /* giữ server gốc */ }
+        } catch (e) { /* keep default server */ }
     }
     if (!iframeSrc) return [];
 
@@ -327,9 +327,9 @@ export async function extractStreams(tmdbId, mediaType, season, episode) {
     try {
         const master = await fetchText(streamUrl, { headers: { Referer: watchUrl } });
         quality = parseQuality(master);
-    } catch (e) { /* giữ item, bỏ quality */ }
+    } catch (e) { /* keep stream, drop quality tag */ }
 
-    // Host m3u8/segment public (verify 200 không Referer) → không gắn headers.
+    // Public m3u8/segment host (verified 200 without Referer) → omit headers.
     const label = quality ? `BluPhim [${quality}]` : 'BluPhim [Auto]';
     return [{
         title: label,

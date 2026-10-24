@@ -2,25 +2,25 @@ import { CONFIG } from './config.js';
 import { fetchJson, fetchText } from './http.js';
 
 const IMDB_ID_RE = /^tt\d+$/i;
-const PHAN_NAME_RE = /\(Phần\s*(\d+)\)/i;
+const PHAN_NAME_RE = /\(Ph\u1ea7n\s*(\d+)\)/i;
 const PHAN_SLUG_RE = /-phan-(\d+)$/i;
 const SEASON_EN_RE = /\(season\s*(\d+)\)/i;
 const HASH_RE = /[?&]hash=([a-f0-9]+)/i;
 
 const VN_DIACRITICS = [
-    ['à', 'a'], ['á', 'a'], ['ả', 'a'], ['ã', 'a'], ['ạ', 'a'], ['ă', 'a'], ['ằ', 'a'], ['ắ', 'a'], ['ẳ', 'a'], ['ẵ', 'a'], ['ặ', 'a'],
-    ['â', 'a'], ['ầ', 'a'], ['ấ', 'a'], ['ẩ', 'a'], ['ẫ', 'a'], ['ậ', 'a'],
-    ['è', 'e'], ['é', 'e'], ['ẻ', 'e'], ['ẽ', 'e'], ['ẹ', 'e'], ['ê', 'e'], ['ề', 'e'], ['ế', 'e'], ['ể', 'e'], ['ễ', 'e'], ['ệ', 'e'],
-    ['ì', 'i'], ['í', 'i'], ['ỉ', 'i'], ['ĩ', 'i'], ['ị', 'i'],
-    ['ò', 'o'], ['ó', 'o'], ['ỏ', 'o'], ['õ', 'o'], ['ọ', 'o'], ['ô', 'o'], ['ồ', 'o'], ['ố', 'o'], ['ổ', 'o'], ['ỗ', 'o'], ['ộ', 'o'],
-    ['ơ', 'o'], ['ờ', 'o'], ['ớ', 'o'], ['ở', 'o'], ['ỡ', 'o'], ['ợ', 'o'],
-    ['ù', 'u'], ['ú', 'u'], ['ủ', 'u'], ['ũ', 'u'], ['ụ', 'u'], ['ư', 'u'], ['ừ', 'u'], ['ứ', 'u'], ['ử', 'u'], ['ữ', 'u'], ['ự', 'u'],
-    ['ỳ', 'y'], ['ý', 'y'], ['ỷ', 'y'], ['ỹ', 'y'], ['ỵ', 'y'],
-    ['đ', 'd'],
+    ['\u00e0', 'a'], ['\u00e1', 'a'], ['\u1ea3', 'a'], ['\u00e3', 'a'], ['\u1ea1', 'a'], ['\u0103', 'a'], ['\u1eb1', 'a'], ['\u1eaf', 'a'], ['\u1eb3', 'a'], ['\u1eb5', 'a'], ['\u1eb7', 'a'],
+    ['\u00e2', 'a'], ['\u1ea7', 'a'], ['\u1ea5', 'a'], ['\u1ea9', 'a'], ['\u1eab', 'a'], ['\u1ead', 'a'],
+    ['\u00e8', 'e'], ['\u00e9', 'e'], ['\u1ebb', 'e'], ['\u1ebd', 'e'], ['\u1eb9', 'e'], ['\u00ea', 'e'], ['\u1ec1', 'e'], ['\u1ebf', 'e'], ['\u1ec3', 'e'], ['\u1ec5', 'e'], ['\u1ec7', 'e'],
+    ['\u00ec', 'i'], ['\u00ed', 'i'], ['\u1ec9', 'i'], ['\u0129', 'i'], ['\u1ecb', 'i'],
+    ['\u00f2', 'o'], ['\u00f3', 'o'], ['\u1ecf', 'o'], ['\u00f5', 'o'], ['\u1ecd', 'o'], ['\u00f4', 'o'], ['\u1ed3', 'o'], ['\u1ed1', 'o'], ['\u1ed5', 'o'], ['\u1ed7', 'o'], ['\u1ed9', 'o'],
+    ['\u01a1', 'o'], ['\u1edd', 'o'], ['\u1edb', 'o'], ['\u1edf', 'o'], ['\u1ee1', 'o'], ['\u1ee3', 'o'],
+    ['\u00f9', 'u'], ['\u00fa', 'u'], ['\u1ee7', 'u'], ['\u0169', 'u'], ['\u1ee5', 'u'], ['\u01b0', 'u'], ['\u1eeb', 'u'], ['\u1ee9', 'u'], ['\u1eed', 'u'], ['\u1eef', 'u'], ['\u1ef1', 'u'],
+    ['\u1ef3', 'y'], ['\u00fd', 'y'], ['\u1ef7', 'y'], ['\u1ef9', 'y'], ['\u1ef5', 'y'],
+    ['\u0111', 'd'],
     ['(', ''], [')', ''], ['[', ''], [']', ''], [':', ''], ['?', ''], ['!', ''], ['.', ''], [',', ''], ["'", ''], ['"', ''], ['&', ''],
 ];
 
-/** Đọc số Phần từ name/slug của item nguonc. Không marker → Phần 1. */
+/** Extract part number from item name/slug. Defaults to part 1 if unmarked. */
 export function parsePhan(name, slug) {
     const mName = PHAN_NAME_RE.exec(String(name || ''));
     if (mName) return Number(mName[1]);
@@ -28,7 +28,7 @@ export function parsePhan(name, slug) {
     return mSlug ? Number(mSlug[1]) : 1;
 }
 
-/** Chuẩn hóa tiêu đề để so khớp: bỏ "(Phần N)"/"(Season N)", lowercase, gom khoảng trắng. */
+/** Normalize title for matching: strip "(Part N)"/"(Season N)", lowercase, collapse whitespace. */
 export function normalizeTitle(s) {
     return String(s || '')
         .replace(PHAN_NAME_RE, ' ')
@@ -39,7 +39,7 @@ export function normalizeTitle(s) {
         .trim();
 }
 
-/** Slugify kiểu nguonc: bỏ dấu tiếng Việt, lowercase, nối "-". */
+/** NguonC slugify: strip Vietnamese diacritics, lowercase, hyphen-separated. */
 export function slugify(title) {
     let s = String(title || '').toLowerCase();
     VN_DIACRITICS.forEach(([from, to]) => {
@@ -53,10 +53,10 @@ export function slugify(title) {
 }
 
 /**
- * TMDB metadata → tên để search nguonc (nguonc KHÔNG có tmdb/imdb id nào).
- * Hỗ trợ id số (movie/tv) và imdb "tt..." (qua TMDB Find API - imdb cung cấp tên → OK).
- * Lấy cả 2 ngôn ngữ: en-US cho original_name/search, vi cho name → slugify khớp slug thật
- * của nguonc (slug = strip từ name tiếng Việt, vd "Siêu Nhiên" -> "sieu-nhien").
+ * TMDB metadata → query name for nguonc (nguonc lacks tmdb/imdb IDs).
+ * Supports numeric IDs (movie/tv) and IMDB "tt..." via TMDB Find API.
+ * Fetches en-US for original_name/search and vi for name → slugify matches nguonc slugs
+ * (slug is stripped from Vietnamese name, e.g. "Sieu Nhien" -> "sieu-nhien").
  */
 export async function tmdbMeta(tmdbId, mediaType) {
     let id = tmdbId;
@@ -66,7 +66,7 @@ export async function tmdbMeta(tmdbId, mediaType) {
         );
         const list = mediaType === 'tv' ? find.tv_results : find.movie_results;
         const first = (list || [])[0];
-        if (!first) throw new Error(`TMDB find rỗng cho ${tmdbId}`);
+        if (!first) throw new Error(`TMDB find returned empty for ${tmdbId}`);
         id = first.id;
     }
     const [docEn, docVi] = await Promise.all([
@@ -74,7 +74,7 @@ export async function tmdbMeta(tmdbId, mediaType) {
         fetchJson(`${CONFIG.TMDB_API_BASE}/${mediaType}/${id}?api_key=${CONFIG.TMDB_API_KEY}&language=vi`),
     ]);
     const doc = docEn || docVi || {};
-    if (!doc.name && !doc.title) throw new Error(`TMDB ${mediaType}/${id} không có metadata`);
+    if (!doc.name && !doc.title) throw new Error(`TMDB ${mediaType}/${id} has no metadata`);
     const enName = doc.name || doc.title;
     const viName = (docVi && (docVi.name || docVi.title)) || null;
     return {
@@ -87,23 +87,23 @@ export async function tmdbMeta(tmdbId, mediaType) {
     };
 }
 
-/** Search nguonc theo keyword (original_name EN đã verify trả đủ "Phần N"). */
+/** Search nguonc by keyword (EN original_name verified to return all parts). */
 export async function searchNguonc(keyword, base = CONFIG.BASE_URL) {
     const data = await fetchJson(`${base}/films/search?keyword=${encodeURIComponent(keyword)}`);
     return (data && data.items) || [];
 }
 
-/** Search an toàn: endpoint lỗi → [] (không làm chết luồng). */
+/** Safe search: returns [] on endpoint error without failing the flow. */
 export async function searchNguoncSafe(keyword, base = CONFIG.BASE_URL) {
     try {
         return await searchNguonc(keyword, base);
     } catch (e) {
-        console.warn(`[NguồnC] search "${keyword}" lỗi: ${e.message}`);
+        console.warn(`[Ngu\u1ed3nC] search "${keyword}" error: ${e.message}`);
         return [];
     }
 }
 
-/** Phần dư sau tên gốc chỉ hợp lệ nếu là marker season/phần (tránh nhầm "Supernatural Events"). */
+/** Trailing text after title is only valid if it is a season/part marker (prevents false matches like "Supernatural Events"). */
 function titleMatches(t, want) {
     if (t === want) return true;
     if (!t.startsWith(want)) return false;
@@ -119,10 +119,10 @@ function aliasMatches(originalName, want) {
 }
 
 /**
- * Chọn item khớp: title chuẩn hóa == original_name TMDB VÀ Phần == season yêu cầu.
- * original_name nguonc có thể là danh sách alias (", " ngăn cách) → match từng alias,
- * phần dư sau tên gốc phải là marker season/phần ("2nd Season", "Season 2", "4").
- * STRICT → không khớp season = null. KHÔNG strict → rơi về item đúng title (dù sai Phần).
+ * Select matching item: normalized title == TMDB original_name AND part == requested season.
+ * nguonc original_name can be a comma-separated alias list → test each alias;
+ * trailing text after title must be a season/part marker ("2nd Season", "Season 2", "4").
+ * STRICT → season mismatch returns null. Non-strict falls back to matching title.
  */
 export function pickItem(items, meta, season, strict = true) {
     const want = normalizeTitle(meta.originalName);
@@ -137,7 +137,7 @@ export function pickItem(items, meta, season, strict = true) {
     return titleCandidate;
 }
 
-/** Candidate slugs: từ name Việt (ưu tiên) + original_name EN + name EN, kèm "-phan-N" khi multi-season. */
+/** Candidate slugs: Vietnamese name (priority) + EN original_name + EN name, with "-phan-N" for multi-season. */
 export function slugCandidates(meta, season) {
     const names = [meta.nameVi, meta.originalName, meta.name].filter(Boolean);
     const base = [];
@@ -156,7 +156,7 @@ export function slugCandidates(meta, season) {
     return out;
 }
 
-/** Fallback slug: gọi detail trực tiếp theo từng candidate slug (bao quát khi search không ra). */
+/** Fallback slug: fetch detail directly by candidate slugs when search misses. */
 export async function fetchDetailBySlugCandidates(candidates, base = CONFIG.BASE_URL) {
     const seen = {};
     for (const slug of candidates) {
@@ -167,12 +167,12 @@ export async function fetchDetailBySlugCandidates(candidates, base = CONFIG.BASE
             if (detail && detail.movie && detail.movie.name) {
                 return { item: { name: detail.movie.name, slug }, movie: detail.movie };
             }
-        } catch (e) { /* slug sai → thử tiếp */ }
+        } catch (e) { /* invalid slug → continue */ }
     }
     return null;
 }
 
-/** Lấy entry {server, embed} của tập cần từ detail movie (items: [{name, slug, embed}]). */
+/** Extract {server, embed} entries for requested episode from movie detail (items: [{name, slug, embed}]). */
 export function pickEpisodeEntries(movie, episode, season) {
     const out = [];
     const eps = Number(episode) || 0;
@@ -189,12 +189,12 @@ export function pickEpisodeEntries(movie, episode, season) {
 function matchEpisodeName(e, episode, season) {
     const name = String(e && e.name || '');
     if (name === String(episode)) return true;
-    // Tập đầu / phim lẻ: chấp nhận "1" hoặc "Full" khi yêu cầu episode <= 1 (season 1).
+    // First episode / movie: accept "1" or "Full" for episode <= 1 (season 1).
     if (episode <= 1 && season <= 1 && (name === '1' || /full/i.test(name))) return true;
     return false;
 }
 
-/** Base origin của URL embed (https://host). */
+/** Base origin of embed URL (https://host). */
 export function embedBase(url) {
     const m = /^(https?:\/\/[^/]+)/i.exec(String(url || ''));
     return m ? m[1] : null;
@@ -206,16 +206,16 @@ const embedHash = (url) => {
 };
 
 /**
- * Chuyển embed streamc.xyz → playlist HLS thật (đã verify bằng HTTP thật):
+ * Resolve streamc.xyz embed → real HLS playlist (verified with live HTTP):
  *   1. POST embed.php?hash=... {action:"bootstrap", playlist_format:"hls", path_chunks:true}
- *      (cần Origin/Referer = origin của embed; thiếu → {"error":"wrong_origin"}).
+ *      (requires Origin/Referer = embed origin; returns {"error":"wrong_origin"} otherwise).
  *   2. POST {action:"issue", bootstrap:<JWT>, turnstile_response:null, ...} → {playlist, expiresAt}.
- * Playlist URL trả về KHÔNG có đuôi .m3u8 (path dài) → stream phải khai "type":"hls".
- * Nếu URL đã là m3u8 trực tiếp → dùng thẳng (không qua bootstrap).
+ * Returned playlist URL lacks .m3u8 extension (long path) → stream MUST declare type: 'hls'.
+ * Direct .m3u8 URLs are used directly without bootstrapping.
  */
 export async function resolveEmbedPlaylist(embed) {
     const origin = embedBase(embed);
-    if (!origin) throw new Error(`embed không hợp lệ: ${embed}`);
+    if (!origin) throw new Error(`invalid embed: ${embed}`);
     if (/\.m3u8/i.test(embed) || !/embed\.php/i.test(embed)) {
         return { url: embed, origin };
     }
@@ -237,7 +237,7 @@ export async function resolveEmbedPlaylist(embed) {
         pretty_url: true,
         path_chunks: true,
     });
-    if (!bs || !bs.bootstrap) throw new Error('bootstrap thất bại (streamc.xyz)');
+    if (!bs || !bs.bootstrap) throw new Error('bootstrap failed (streamc.xyz)');
 
     const issue = await post({
         action: 'issue',
@@ -248,23 +248,22 @@ export async function resolveEmbedPlaylist(embed) {
         path_chunks: true,
         frame_origins: [origin],
     });
-    if (!issue || !issue.playlist) throw new Error('issue thất bại (streamc.xyz)');
+    if (!issue || !issue.playlist) throw new Error('issue failed (streamc.xyz)');
 
-    // Verify playlist: với playlist_format=hls streamc trả plain "#EXTM3U"; nếu gặp
-    // "#ENC-AESGCM" (mã hóa) thì player không đọc được → loại stream.
-    let playlistText = null;
+    // Verify playlist: streamc returns plain "#EXTM3U" for playlist_format=hls;
+    // "#ENC-AESGCM" (encrypted) cannot be parsed by player → drop stream.
     try {
         playlistText = await fetchText(issue.playlist, {
             headers: { Origin: origin, Referer: `${origin}/`, 'User-Agent': CONFIG.STREAM_UA, Accept: '*/*' },
         });
     } catch (e) {
-        // Cho qua nếu verify fail — app tự fetch lại.
+        // Ignore verify errors — app will re-fetch.
     }
     if (playlistText && /^#ENC-/m.test(playlistText)) {
-        throw new Error('playlist bị mã hóa (#ENC-AESGCM) — app không đọc được');
+        throw new Error('playlist is encrypted (#ENC-AESGCM) — unplayable');
     }
     if (playlistText && !/^#EXTM3U/m.test(playlistText)) {
-        throw new Error('playlist trả về không phải HLS');
+        throw new Error('returned playlist is not HLS');
     }
 
     return { url: issue.playlist, origin };
@@ -279,7 +278,7 @@ export async function extractStreams(tmdbId, mediaType, season, episode, options
     let items = await searchNguoncSafe(meta.originalName);
     let item = pickItem(items, meta, reqSeason, CONFIG.STRICT_SEASON);
 
-    // Search EN không ra → thử name Việt từ TMDB (language=vi).
+    // EN search missed → try Vietnamese name from TMDB (language=vi).
     if (!item && meta.nameVi && meta.nameVi !== meta.originalName) {
         const viItems = await searchNguoncSafe(meta.nameVi);
         item = pickItem(viItems, meta, reqSeason, CONFIG.STRICT_SEASON);
@@ -290,30 +289,30 @@ export async function extractStreams(tmdbId, mediaType, season, episode, options
         return await buildStreams((detail && detail.movie) || {}, item, episode, reqSeason);
     }
 
-    // Fallback slug: dựng slug từ name (EN hay Việt đều được) rồi gọi detail trực tiếp.
+    // Fallback slug: build slug candidates from name (EN or VI) and fetch detail directly.
     const slugHit = await fetchDetailBySlugCandidates(slugCandidates(meta, reqSeason));
     if (slugHit) {
-        console.warn(`[NguồnC] search không ra, dùng slug fallback: ${slugHit.slug}`);
+        console.warn(`[Ngu\u1ed3nC] search missed, using slug fallback: ${slugHit.slug}`);
         return await buildStreams(slugHit.movie, slugHit.item, episode, reqSeason);
     }
 
-    console.warn(`[NguồnC] Không có "${meta.originalName}" season ${reqSeason} trên nguonc.`);
+    console.warn(`[Ngu\u1ed3nC] No "${meta.originalName}" season ${reqSeason} on nguonc.`);
     return [];
 }
 
 async function buildStreams(movie, item, episode, reqSeason) {
     const entries = pickEpisodeEntries(movie, episode, reqSeason);
     if (!entries.length) {
-        console.warn(`[NguồnC] ${item.name} (${item.slug}): không có tập ${episode}.`);
+        console.warn(`[Ngu\u1ed3nC] ${item.name} (${item.slug}): missing episode ${episode}.`);
         return [];
     }
     const streams = [];
     for (const ent of entries) {
         try {
             const { url, origin } = await resolveEmbedPlaylist(ent.embed);
-            // headers TOP-LEVEL: PluginRuntime.parseJsonResults chỉ giữ whitelist
-            // (item["headers"]) và StreamFetchSupport map sang proxyHeaders — nếu để
-            // riêng behaviorHints.proxyHeaders thì runtime local sẽ VỨT MẤT headers.
+            // TOP-LEVEL headers: PluginRuntime.parseJsonResults only keeps whitelisted
+            // item["headers"] and StreamFetchSupport maps them to proxyHeaders — storing
+            // only in behaviorHints.proxyHeaders causes local runtime to drop them.
             const headers = {
                 Referer: `${origin}/`,
                 Origin: origin,
@@ -322,7 +321,7 @@ async function buildStreams(movie, item, episode, reqSeason) {
             };
             streams.push({
                 name: CONFIG.PROVIDER_NAME,
-                title: `${ent.server} · Tập ${ent.entryName}`,
+                title: `${ent.server} · T\u1eadp ${ent.entryName}`,
                 url,
                 type: 'hls',
                 headers,
@@ -332,7 +331,7 @@ async function buildStreams(movie, item, episode, reqSeason) {
                 },
             });
         } catch (e) {
-            console.warn(`[NguồnC] ${item.name} T${episode} [${ent.server}]: ${e.message}`);
+            console.warn(`[Ngu\u1ed3nC] ${item.name} E${episode} [${ent.server}]: ${e.message}`);
         }
     }
     return streams;

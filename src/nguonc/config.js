@@ -4,14 +4,14 @@ export const CONFIG = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
         Accept: 'application/json',
     },
-    // UA giống CloudStream port — dùng cho mọi request embed/playlist/segment streamc.xyz
-    // (server trả 403 nếu thiếu Referer/Origin; UA Firefox là chuẩn mà embed dùng).
+    // UA matching the CloudStream port — used for all embed/playlist/segment requests
+    // to streamc.xyz (server returns 403 without Referer/Origin; Firefox UA is what embeds use).
     STREAM_UA: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:143.0) Gecko/20100101 Firefox/143.0',
 
-    PROVIDER_NAME: 'NguồnC',
+    PROVIDER_NAME: 'Ngu\u1ed3nC',
 
-    // true  → season lệch thì tìm item "Phần N" khác; cuối cùng ko có → []
-    // false → dùng item tìm được dù lệch season, title ghi "[Phần {N}]" để user tự quyết
+    // true  → on season mismatch, look for a different "Part N" item; none found → []
+    // false → use the found item despite season mismatch, title marked "[Part {N}]" for the user
     STRICT_SEASON: true,
 
     TMDB_API_BASE: 'https://api.themoviedb.org/3',

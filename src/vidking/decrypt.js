@@ -1,15 +1,15 @@
 /**
- * Giải mã payload sources của SpeedRacelight (port nguyên văn từ vidking.net
- * assets/VideoPlayer-*.js, hàm Pf). Thuần JS — KHÔNG dùng atob/TextDecoder/
- * Buffer (không chắc có trong quickjs-kt runtim của app).
+ * Decrypts the SpeedRacelight sources payload (verbatim port of vidking.net
+ * assets/VideoPlayer-*.js, function Pf). Pure JS — no atob/TextDecoder/Buffer
+ * (not guaranteed to exist in the app's quickjs-kt runtime).
  *
- * Sơ đồ (từ bundle):
- *   payload = base64url( ciphertext )  — chữ ký 4 byte đầu "mvm1" (Ys)
- *   keystream = xorStream(seedString, mediaId, len)  — PRNG kiểu RC4/SHA trộn seed
- *   plain = (ciphertext XOR keystream) bỏ prefix "mvm1" → UTF-8 JSON
+ * Wire format (from the bundle):
+ *   payload = base64url( ciphertext )  — first 4 decrypted bytes are "mvm1" (Ys)
+ *   keystream = xorStream(seedString, mediaId, len)  — RC4/SHA-like PRNG mixing the seed
+ *   plain = (ciphertext XOR keystream) minus "mvm1" prefix → UTF-8 JSON
  */
 
-// ---- Hằng số verbatim từ vk-player.js ----
+// ---- Constants verbatim from vk-player.js ----
 const Hl = [
     1116352408, 1899447441, 3049323471, 3921009573, 961987163, 1508970993,
     2453635748, 2870763221, 3624381080, 310598401, 607225278, 1426881987,
@@ -121,7 +121,7 @@ function xf(l, o, e) {
     return r;
 }
 
-// ---- base64url -> byte array (thủ công, không atob) ----
+// ---- base64url -> byte array (manual, no atob in quickjs) ----
 const B64_CHARS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
 
 function base64urlToBytes(s) {
@@ -146,7 +146,7 @@ function base64urlToBytes(s) {
     return out;
 }
 
-// ---- UTF-8 byte array -> string (thủ công, không TextDecoder) ----
+// ---- UTF-8 byte array -> string (manual, no TextDecoder in quickjs) ----
 function utf8ToString(bytes) {
     let s = '';
     for (let i = 0; i < bytes.length;) {
@@ -170,11 +170,11 @@ function utf8ToString(bytes) {
 }
 
 /**
- * Giải mã payload sources.
- * @param {string} payload  response text từ /cdn/sources-with-title (base64url)
- * @param {string} seed     seed từ /seed?mediaId=
- * @param {number|string} mediaId  tmdbId int (tham số PRNG)
- * @returns {object} { sources, subtitles, thumbnail, ... } — throw nếu bad seed
+ * Decrypts the sources payload.
+ * @param {string} payload  response text from /cdn/sources-with-title (base64url)
+ * @param {string} seed     seed from /seed?mediaId=
+ * @param {number|string} mediaId  tmdbId int (PRNG input)
+ * @returns {object} { sources, subtitles, thumbnail, ... } — throws on bad seed
  */
 export function decryptPayload(payload, seed, mediaId) {
     const bytes = base64urlToBytes(payload);

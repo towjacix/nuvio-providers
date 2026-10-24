@@ -2,7 +2,7 @@ import { CONFIG } from './config.js';
 import { fetchJson, fetchText } from './http.js';
 import { decryptPayload } from './decrypt.js';
 
-/** Cache seed (server TTL 30s → cache 25s để tránh seed-invalid khi retry). */
+/** Seed cache (server TTL 30s → cache 25s to avoid seed-invalid on retry). */
 let seedCache = { value: null, at: 0 };
 
 export function resetSeedCache() {
@@ -17,15 +17,15 @@ async function fetchSeed(mediaId) {
     const json = await fetchJson(`${CONFIG.SPEED_API}/seed?mediaId=${encodeURIComponent(String(mediaId))}`);
     const seed = json && typeof json.seed === 'string' && json.seed.length ? json.seed : null;
     if (!seed) {
-        throw new Error('seed rỗng từ SpeedRacelight');
+        throw new Error('empty seed from SpeedRacelight');
     }
     seedCache = { value: seed, at: now };
     return seed;
 }
 
 /**
- * Metadata TMDB: title/name, year (YYYY), imdbId. App chỉ truyền tmdbId,
- * nên provider tự lấy title để gọi sources-with-title + subs.
+ * TMDB metadata: title/name, year (YYYY), imdbId. The app only passes tmdbId,
+ * so the provider resolves the title itself for sources-with-title + subs.
  */
 export async function tmdbMeta(tmdbId, mediaType) {
     const type = mediaType === 'tv' ? 'tv' : 'movie';
@@ -34,14 +34,14 @@ export async function tmdbMeta(tmdbId, mediaType) {
 
     let info;
     if (isImdb) {
-        // IMDB ID → resolve qua TMDB /3/find/ (giống nguonc/kkphim)
+        // IMDB ID → resolve via TMDB /3/find/ (same as nguonc/kkphim)
         const find = await fetchJson(
             `${CONFIG.TMDB_API_BASE}/find/${encodeURIComponent(rawId)}?external_source=imdb_id&api_key=${CONFIG.TMDB_API_KEY}`,
         );
         const list = type === 'tv' ? (find.tv_results || []) : (find.movie_results || []);
         info = list[0];
         if (!info) {
-            console.warn(`[VidKing] TMDB find không có kết quả cho IMDB ${rawId}`);
+            console.warn(`[VidKing] TMDB find returned no result for IMDB ${rawId}`);
             return { title: '', year: '', imdbId: rawId };
         }
     } else {
@@ -64,7 +64,7 @@ export async function tmdbMeta(tmdbId, mediaType) {
     };
 }
 
-/** Nối URL sources-with-title (giữ nguyên thứ tự tham số như bundle). */
+/** Builds sources-with-title URL (param order kept identical to the bundle). */
 function buildSourcesUrl(meta, mediaType, season, episode, seed) {
     const tv = mediaType === 'tv';
     const qs = [
@@ -86,7 +86,7 @@ const SUB_HEADERS = { Referer: CONFIG.REFERER };
 
 const SUB_PRIORITY = { vi: 0, vietnamese: 0, en: 1, english: 1 };
 
-/** Lấy/dedupe VTT sub từ payload sources (gắn headers Referer vidking — 403 nếu thiếu). */
+/** Extracts/dedupes VTT subs from the sources payload (vidking Referer header — 403 without it). */
 function subsFromPayload(payload) {
     const raw = (payload && Array.isArray(payload.subtitles)) ? payload.subtitles : [];
     const seen = new Set();
@@ -113,7 +113,7 @@ function subsFromPayload(payload) {
     return out;
 }
 
-/** Fallback: subs.videasy.to (SRT từ OpenSubtitles, download public). */
+/** Fallback: subs.videasy.to (OpenSubtitles SRT, public download). */
 async function subsFromVideasy(imdbId) {
     if (!imdbId) return [];
     try {
@@ -133,12 +133,12 @@ async function subsFromVideasy(imdbId) {
         }
         return out;
     } catch (e) {
-        console.warn(`[VidKing] subs.videasy fallback lỗi: ${e && e.message ? e.message : String(e)}`);
+        console.warn(`[VidKing] subs.videasy fallback failed: ${e && e.message ? e.message : String(e)}`);
         return [];
     }
 }
 
-/** Map JSON đã giải mã → các stream items (video + sub gắn vào từng item). */
+/** Maps decrypted JSON → stream items (video + subs attached to each item). */
 export function toStreamItems(payload, meta) {
     const sources = (payload && Array.isArray(payload.sources)) ? payload.sources : [];
     if (!sources.length) return [];
@@ -155,7 +155,7 @@ export function toStreamItems(payload, meta) {
             url: s.url,
             quality: (quality && quality !== 'Auto') ? quality : undefined,
             type: 'hls',
-            headers: CONFIG.REFERER ? { Referer: CONFIG.REFERER } : {}, // variant/segment cần Referer (403 nếu thiếu)
+            headers: CONFIG.REFERER ? { Referer: CONFIG.REFERER } : {}, // variant/segment need Referer (403 without it)
             ...(subs.length ? { subtitles: subs } : {}),
         });
     }
@@ -163,8 +163,8 @@ export function toStreamItems(payload, meta) {
 }
 
 /**
- * Entry point: metadata TMDB → seed → sources → decrypt → items.
- * TV thiếu season/episode → [] (không có cách biết tập nào).
+ * Entry point: TMDB metadata → seed → sources → decrypt → items.
+ * TV without season/episode → [] (no way to know which episode).
  */
 export async function extractStreams(tmdbId, mediaType, season, episode) {
     if (!tmdbId) return [];
@@ -173,10 +173,10 @@ export async function extractStreams(tmdbId, mediaType, season, episode) {
 
     const meta = await tmdbMeta(tmdbId, mediaType);
     if (!meta.title) {
-        console.warn(`[VidKing] TMDB không có title cho ${mediaType} ${tmdbId}`);
+        console.warn(`[VidKing] TMDB has no title for ${mediaType} ${tmdbId}`);
         return [];
     }
-    // tmdbNumericId: TMDB int ID thực (resolve từ IMDB nếu cần — seed/sources phải dùng số, không phải "tt...")
+    // tmdbNumericId: real TMDB int ID (resolved from IMDB if needed — seed/sources need a number, not "tt...")
     const numericId = meta.tmdbNumericId || tmdbId;
     meta.tmdbId = numericId;
 
@@ -188,13 +188,13 @@ export async function extractStreams(tmdbId, mediaType, season, episode) {
         const text = await fetchText(url);
         payload = decryptPayload(text, seed, numericId);
     } catch (e) {
-        // seed-invalid (TTL 30s) hoặc bad payload → thử lại 1 lần với seed mới
+        // seed-invalid (TTL 30s) or bad payload → retry once with a fresh seed
         if (/decrypt failed|seed/.test(String(e && e.message))) {
             seedCache = { value: null, at: 0 };
             const seed2 = await fetchSeed(numericId);
             const text2 = await fetchText(buildSourcesUrl(meta, mediaType, season, episode, seed2));
             payload = decryptPayload(text2, seed2, numericId);
-            // retry thành công → KHÔNG throw
+            // retry succeeded → do NOT throw
         } else {
             throw e;
         }
@@ -202,7 +202,7 @@ export async function extractStreams(tmdbId, mediaType, season, episode) {
 
     let items = toStreamItems(payload, meta);
 
-    // Payload không kèm sub (movie thường rỗng) → fallback OpenSubtitles qua subs.videasy.to
+    // Payload without subs (movies are usually empty) → OpenSubtitles fallback via subs.videasy.to
     if (items.length && !(payload && Array.isArray(payload.subtitles) && payload.subtitles.length) && meta.imdbId) {
         const subs = await subsFromVideasy(meta.imdbId);
         if (subs.length) {

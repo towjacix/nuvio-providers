@@ -1,17 +1,17 @@
 /**
- * BluPhim provider — nguồn Việt FullHD (site freetube.com.mx / mirror bluphim5.com).
+ * BluPhim provider — Vietnamese FullHD source (freetube.com.mx / mirror bluphim5.com).
  *
- * RE từ CloudStream plugin com.anhdaden.BluPhimProvider (repo gitlab.com/tearrs/movie):
- * - domainUrl động: fetch bluphim.txt (github Datj0000/domain) → domain live
- *   (decode custom-base64 hashUrl nếu cần; hiện tại = https://freetube.com.mx)
+ * Port of CloudStream plugin com.anhdaden.BluPhimProvider (repo gitlab.com/tearrs/movie):
+ * - dynamic domainUrl: fetch bluphim.txt (github Datj0000/domain) → live domain
+ *   (custom-base64 hashUrl decode if needed; currently = https://freetube.com.mx)
  * - search:  GET {base}/search?k={title} → li.film-item-ver (.name, .real-name year, a[href^=/phim/])
  * - detail:  GET {base}/phim/{slug} → link imdb.com/title/tt... + a[href^=/xem-phim/]
  * - watch:   GET {base}/xem-phim/{slug}[/tap-{ep}] → iframe#iframeStream[src]
  * - embed:   moviking.neuronix.sbs/embed3rd → cdn.codexa.fun/streaming3rd → var url = '...m3u8'
- * - m3u8 host kkphimplayer7 (v7): master/variant/segment PUBLIC, không cần Referer (verify 200)
+ * - m3u8 host kkphimplayer7 (v7): master/variant/segment PUBLIC, no Referer needed (verify 200)
  *
- * TV: /xem-phim/{slug}/tap-{episode}. Multi-season (nhiều Phần/slug riêng) — ngoài scope v1.
- * Sub: luồng embed không expose sub rời → v1 video-only (CẤM gắn sub chết).
+ * TV: /xem-phim/{slug}/tap-{episode}. Multi-season (separate parts/slugs) — out of scope for v1.
+ * Sub: embed flow does not expose separate subs → v1 video-only (never attach a dead sub).
  */
 export const CONFIG = {
     BASE_URL: 'https://freetube.com.mx',
@@ -25,11 +25,11 @@ export const CONFIG = {
 
     PROVIDER_NAME: 'BluPhim',
 
-    // Metadata TMDB (title/year/imdbId) — app chỉ truyền tmdbId
+    // TMDB metadata (title/year/imdbId) — app only passes tmdbId
     TMDB_API_BASE: 'https://api.themoviedb.org/3',
     TMDB_API_KEY: '1865f43a0549ca50d341dd9ab8b29f49',
 
-    // Số ứng viên detail tối đa để verify imdb
-    // (search trả ~10 li.item thật; entry đúng hay đứng sau 4-5 tựa gần tên)
+    // Max detail candidates to verify against imdb
+    // (search returns ~10 real li.item entries; correct one often sits behind 4-5 near-name titles)
     MAX_VERIFY_CANDIDATES: 10,
 };

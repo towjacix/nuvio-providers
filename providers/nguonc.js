@@ -1,6 +1,6 @@
 /**
  * nguonc - Built from src/nguonc/
- * Generated: 2026-09-10T12:27:43.644Z
+ * Generated: 2026-10-24T16:39:03.786Z
  */
 var __defProp = Object.defineProperty;
 var __defProps = Object.defineProperties;
@@ -49,12 +49,12 @@ var CONFIG = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
     Accept: "application/json"
   },
-  // UA giống CloudStream port — dùng cho mọi request embed/playlist/segment streamc.xyz
-  // (server trả 403 nếu thiếu Referer/Origin; UA Firefox là chuẩn mà embed dùng).
+  // UA matching the CloudStream port — used for all embed/playlist/segment requests
+  // to streamc.xyz (server returns 403 without Referer/Origin; Firefox UA is what embeds use).
   STREAM_UA: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:143.0) Gecko/20100101 Firefox/143.0",
   PROVIDER_NAME: "Ngu\u1ED3nC",
-  // true  → season lệch thì tìm item "Phần N" khác; cuối cùng ko có → []
-  // false → dùng item tìm được dù lệch season, title ghi "[Phần {N}]" để user tự quyết
+  // true  → on season mismatch, look for a different "Part N" item; none found → []
+  // false → use the found item despite season mismatch, title marked "[Part {N}]" for the user
   STRICT_SEASON: true,
   TMDB_API_BASE: "https://api.themoviedb.org/3",
   TMDB_API_KEY: "1865f43a0549ca50d341dd9ab8b29f49"
@@ -103,7 +103,7 @@ function request(_0) {
         } catch (e2) {
         }
       }
-      throw new Error(e && e.name === "AbortError" ? `timeout sau ${TIMEOUT_MS}ms` : e && e.message || "fetch error");
+      throw new Error(e && e.name === "AbortError" ? `timeout after ${TIMEOUT_MS}ms` : e && e.message || "fetch error");
     }
   });
 }
@@ -122,7 +122,7 @@ function fetchText(_0) {
 
 // src/nguonc/extractor.js
 var IMDB_ID_RE = /^tt\d+$/i;
-var PHAN_NAME_RE = /\(Phần\s*(\d+)\)/i;
+var PHAN_NAME_RE = /\(Ph\u1ea7n\s*(\d+)\)/i;
 var PHAN_SLUG_RE = /-phan-(\d+)$/i;
 var SEASON_EN_RE = /\(season\s*(\d+)\)/i;
 var HASH_RE = /[?&]hash=([a-f0-9]+)/i;
@@ -234,7 +234,7 @@ function tmdbMeta(tmdbId, mediaType) {
       const list = mediaType === "tv" ? find.tv_results : find.movie_results;
       const first = (list || [])[0];
       if (!first)
-        throw new Error(`TMDB find r\u1ED7ng cho ${tmdbId}`);
+        throw new Error(`TMDB find returned empty for ${tmdbId}`);
       id = first.id;
     }
     const [docEn, docVi] = yield Promise.all([
@@ -243,7 +243,7 @@ function tmdbMeta(tmdbId, mediaType) {
     ]);
     const doc = docEn || docVi || {};
     if (!doc.name && !doc.title)
-      throw new Error(`TMDB ${mediaType}/${id} kh\xF4ng c\xF3 metadata`);
+      throw new Error(`TMDB ${mediaType}/${id} has no metadata`);
     const enName = doc.name || doc.title;
     const viName = docVi && (docVi.name || docVi.title) || null;
     return {
@@ -267,7 +267,7 @@ function searchNguoncSafe(_0) {
     try {
       return yield searchNguonc(keyword, base);
     } catch (e) {
-      console.warn(`[Ngu\u1ED3nC] search "${keyword}" l\u1ED7i: ${e.message}`);
+      console.warn(`[Ngu\u1ED3nC] search "${keyword}" error: ${e.message}`);
       return [];
     }
   });
@@ -372,7 +372,7 @@ function resolveEmbedPlaylist(embed) {
   return __async(this, null, function* () {
     const origin = embedBase(embed);
     if (!origin)
-      throw new Error(`embed kh\xF4ng h\u1EE3p l\u1EC7: ${embed}`);
+      throw new Error(`invalid embed: ${embed}`);
     if (/\.m3u8/i.test(embed) || !/embed\.php/i.test(embed)) {
       return { url: embed, origin };
     }
@@ -394,7 +394,7 @@ function resolveEmbedPlaylist(embed) {
       path_chunks: true
     });
     if (!bs || !bs.bootstrap)
-      throw new Error("bootstrap th\u1EA5t b\u1EA1i (streamc.xyz)");
+      throw new Error("bootstrap failed (streamc.xyz)");
     const issue = yield post({
       action: "issue",
       bootstrap: bs.bootstrap,
@@ -405,8 +405,7 @@ function resolveEmbedPlaylist(embed) {
       frame_origins: [origin]
     });
     if (!issue || !issue.playlist)
-      throw new Error("issue th\u1EA5t b\u1EA1i (streamc.xyz)");
-    let playlistText = null;
+      throw new Error("issue failed (streamc.xyz)");
     try {
       playlistText = yield fetchText(issue.playlist, {
         headers: { Origin: origin, Referer: `${origin}/`, "User-Agent": CONFIG.STREAM_UA, Accept: "*/*" }
@@ -414,10 +413,10 @@ function resolveEmbedPlaylist(embed) {
     } catch (e) {
     }
     if (playlistText && /^#ENC-/m.test(playlistText)) {
-      throw new Error("playlist b\u1ECB m\xE3 h\xF3a (#ENC-AESGCM) \u2014 app kh\xF4ng \u0111\u1ECDc \u0111\u01B0\u1EE3c");
+      throw new Error("playlist is encrypted (#ENC-AESGCM) \u2014 unplayable");
     }
     if (playlistText && !/^#EXTM3U/m.test(playlistText)) {
-      throw new Error("playlist tr\u1EA3 v\u1EC1 kh\xF4ng ph\u1EA3i HLS");
+      throw new Error("returned playlist is not HLS");
     }
     return { url: issue.playlist, origin };
   });
@@ -440,10 +439,10 @@ function extractStreams(_0, _1, _2, _3) {
     }
     const slugHit = yield fetchDetailBySlugCandidates(slugCandidates(meta, reqSeason));
     if (slugHit) {
-      console.warn(`[Ngu\u1ED3nC] search kh\xF4ng ra, d\xF9ng slug fallback: ${slugHit.slug}`);
+      console.warn(`[Ngu\u1ED3nC] search missed, using slug fallback: ${slugHit.slug}`);
       return yield buildStreams(slugHit.movie, slugHit.item, episode, reqSeason);
     }
-    console.warn(`[Ngu\u1ED3nC] Kh\xF4ng c\xF3 "${meta.originalName}" season ${reqSeason} tr\xEAn nguonc.`);
+    console.warn(`[Ngu\u1ED3nC] No "${meta.originalName}" season ${reqSeason} on nguonc.`);
     return [];
   });
 }
@@ -451,7 +450,7 @@ function buildStreams(movie, item, episode, reqSeason) {
   return __async(this, null, function* () {
     const entries = pickEpisodeEntries(movie, episode, reqSeason);
     if (!entries.length) {
-      console.warn(`[Ngu\u1ED3nC] ${item.name} (${item.slug}): kh\xF4ng c\xF3 t\u1EADp ${episode}.`);
+      console.warn(`[Ngu\u1ED3nC] ${item.name} (${item.slug}): missing episode ${episode}.`);
       return [];
     }
     const streams = [];
@@ -476,7 +475,7 @@ function buildStreams(movie, item, episode, reqSeason) {
           }
         });
       } catch (e) {
-        console.warn(`[Ngu\u1ED3nC] ${item.name} T${episode} [${ent.server}]: ${e.message}`);
+        console.warn(`[Ngu\u1ED3nC] ${item.name} E${episode} [${ent.server}]: ${e.message}`);
       }
     }
     return streams;

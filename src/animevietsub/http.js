@@ -2,7 +2,7 @@ import { CONFIG } from './config.js';
 
 const TIMEOUT_MS = 15000;
 
-/** Cookie jar đơn giản (CS3 globalCookies) — CF/redirect đôi khi set cookie cần mang theo. */
+/** Simple cookie jar (CS3 globalCookies) — CF/redirects sometimes set cookies we must carry. */
 let globalCookies = '';
 
 function mergeCookies(setCookies) {
@@ -32,9 +32,9 @@ function readSetCookies(response) {
 }
 
 /**
- * Fetch với timeout TÙY MÔI TRƯỜNG (pattern kkphim/bluphim):
- * - Node (test/e2e): setTimeout có sẵn → abort sau 15s.
- * - Runtime app Nuvio (quickjs-kt): KHÔNG có setTimeout → bỏ qua (gọi là TypeError).
+ * Fetch with environment-dependent timeout (kkphim/bluphim pattern):
+ * - Node (test/e2e): setTimeout exists → abort after 15s.
+ * - Nuvio app runtime (quickjs-kt): NO setTimeout → skip (calling it throws TypeError).
  */
 async function request(url, options = {}) {
     const hasTimers = typeof setTimeout === 'function' && typeof clearTimeout === 'function';
@@ -108,10 +108,10 @@ export async function fetchText(url, options = {}) {
 }
 
 /**
- * fetchText + theo dõi redirect kiểu CS3 fetchWithBypass:
- * - merge Set-Cookie vào jar chung
- * - HTML chứa window.location.href = "..." → follow (tối đa 3 hop, JS-redirect của CF anti-bot)
- * Trả { text, url } (url = URL cuối cùng).
+ * fetchText + CS3 fetchWithBypass-style redirect tracking:
+ * - merges Set-Cookie into the shared jar
+ * - HTML containing window.location.href = "..." → follow (max 3 hops, CF anti-bot JS redirect)
+ * Returns { text, url } (url = final URL).
  */
 const JS_REDIRECT_RE = /window\.location\.href\s*=\s*["']([^"']+)["']/;
 

@@ -1,6 +1,6 @@
 /**
  * animevietsub - Built from src/animevietsub/
- * Generated: 2026-10-24T16:22:57.784Z
+ * Generated: 2026-10-24T16:39:03.797Z
  */
 var __defProp = Object.defineProperty;
 var __defProps = Object.defineProperties;
@@ -44,11 +44,11 @@ var __async = (__this, __arguments, generator) => {
 
 // src/animevietsub/config.js
 var CONFIG = {
-  // Shortlink entry giống CS3; fetch lấy final origin. Fallback khi request fail.
+  // CS3 shortlink entry; fetch to get final origin. Used as fallback when request fails.
   ENTRY_URL: "https://bit.ly/animevietsubtv",
   FALLBACK_BASE_URL: "https://animevietsub.li",
   LEGACY_FALLBACK: "https://animevietsub.site",
-  // fallback của CS3
+  // CS3 fallback
   HEADERS: {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36",
     Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
@@ -58,7 +58,7 @@ var CONFIG = {
   PROVIDER_NAME: "AnimeVietSub",
   TMDB_API_BASE: "https://api.themoviedb.org/3",
   TMDB_API_KEY: "1865f43a0549ca50d341dd9ab8b29f49",
-  // Số server tối đa resolve qua /ajax/player mỗi episode
+  // Max servers resolved via /ajax/player per episode
   MAX_SERVERS: 6
 };
 
@@ -267,11 +267,11 @@ function resolveTmdbId(tmdbId, mediaType) {
   return __async(this, null, function* () {
     const raw = String(tmdbId || "").trim();
     if (!raw)
-      throw new Error("thi\u1EBFu tmdbId");
+      throw new Error("missing tmdbId");
     if (!IMDB_ID_RE.test(raw)) {
       const n = parseInt(raw, 10);
       if (!Number.isFinite(n))
-        throw new Error(`tmdbId l\u1EA1: ${raw}`);
+        throw new Error(`invalid tmdbId: ${raw}`);
       return n;
     }
     const kind = mediaType === "tv" ? "tv" : "movie";
@@ -279,7 +279,7 @@ function resolveTmdbId(tmdbId, mediaType) {
     const json = yield fetchJson(url);
     const hit = (kind === "tv" ? json.tv_results : json.movie_results) || [];
     if (!hit.length || !hit[0].id)
-      throw new Error(`kh\xF4ng resolve \u0111\u01B0\u1EE3c imdb ${raw}`);
+      throw new Error(`failed to resolve imdb ${raw}`);
     return hit[0].id;
   });
 }
@@ -342,7 +342,7 @@ function parseSearchPage(html, base) {
   }
   return items;
 }
-var norm = (s) => String(s || "").toLowerCase().replace(/[^a-z0-9à-ỹ]+/g, " ").trim();
+var norm = (s) => String(s || "").toLowerCase().replace(/[^a-z0-9\u00e0-\u1ef9]+/g, " ").trim();
 var slugOf = (href) => {
   const m = String(href || "").match(/\/([a-z0-9-]+?)(?:\.html)?\/?$/i);
   return m ? m[1].replace(/-/g, " ") : "";
@@ -470,7 +470,7 @@ function extractStreams(tmdbId, mediaType, season, episode) {
     const numericId = yield resolveTmdbId(tmdbId, mediaType);
     const meta = yield tmdbMeta(numericId, mediaType);
     if (!meta.title) {
-      console.warn(`[AnimeVietSub] TMDB kh\xF4ng c\xF3 title cho ${mediaType} ${tmdbId}`);
+      console.warn(`[AnimeVietSub] TMDB returned no title for ${mediaType} ${tmdbId}`);
       return [];
     }
     let candidates = [];
@@ -518,7 +518,7 @@ function extractStreams(tmdbId, mediaType, season, episode) {
       }
     } else {
       for (const [epName, list] of epMap) {
-        if (/full|ho[aà]n t[aấ]t|tap full/i.test(epName)) {
+        if (/full|ho[a\u00e0]n t[a\u1ea5]t|tap full/i.test(epName)) {
           servers = list;
           break;
         }

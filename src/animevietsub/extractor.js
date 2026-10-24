@@ -14,9 +14,9 @@ const decodeEntities = (s) => String(s || '')
     .replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&nbsp;/g, ' ');
 
 /**
- * Base URL: fetch ENTRY_URL (shortlink) lấy origin cuối cùng như CS3 getBaseUrl.
- * CS3 cũng có fallback "https://animevietsub.site" — domain hiện live là .li
- * (xác nhận từ bit.ly). Cache chỉ khi resolve được.
+ * Base URL: fetches ENTRY_URL (shortlink) to get the final origin like CS3 getBaseUrl.
+ * CS3 also has fallback "https://animevietsub.site" — live domain is .li
+ * (confirmed via bit.ly). Cached once resolved.
  */
 export async function resolveBaseUrl() {
     if (cachedBaseUrl) return cachedBaseUrl;
@@ -32,7 +32,7 @@ export async function resolveBaseUrl() {
             return cachedBaseUrl;
         }
     } catch (e) {
-        // entry fail → thử fallback trực tiếp
+        // Entry failed → try fallback directly
     }
     try {
         await fetchText(CONFIG.FALLBACK_BASE_URL + '/');
@@ -44,7 +44,7 @@ export async function resolveBaseUrl() {
             cachedBaseUrl = CONFIG.LEGACY_FALLBACK;
             return cachedBaseUrl;
         } catch (e2) {
-            cachedBaseUrl = CONFIG.FALLBACK_BASE_URL; // site CF — cứ trả, request sau tự fail
+            cachedBaseUrl = CONFIG.FALLBACK_BASE_URL; // Cloudflare-protected site — return base, let subsequent requests fail if blocked
             return cachedBaseUrl;
         }
     }
@@ -54,10 +54,10 @@ const IMDB_ID_RE = /^tt\d+$/i;
 
 export async function resolveTmdbId(tmdbId, mediaType) {
     const raw = String(tmdbId || '').trim();
-    if (!raw) throw new Error('thiếu tmdbId');
+    if (!raw) throw new Error('missing tmdbId');
     if (!IMDB_ID_RE.test(raw)) {
         const n = parseInt(raw, 10);
-        if (!Number.isFinite(n)) throw new Error(`tmdbId lạ: ${raw}`);
+        if (!Number.isFinite(n)) throw new Error(`invalid tmdbId: ${raw}`);
         return n;
     }
     const kind = mediaType === 'tv' ? 'tv' : 'movie';
@@ -65,7 +65,7 @@ export async function resolveTmdbId(tmdbId, mediaType) {
         `?api_key=${CONFIG.TMDB_API_KEY}&external_source=imdb_id`;
     const json = await fetchJson(url);
     const hit = (kind === 'tv' ? json.tv_results : json.movie_results) || [];
-    if (!hit.length || !hit[0].id) throw new Error(`không resolve được imdb ${raw}`);
+    if (!hit.length || !hit[0].id) throw new Error(`failed to resolve imdb ${raw}`);
     return hit[0].id;
 }
 
@@ -130,13 +130,13 @@ export function parseSearchPage(html, base) {
     return items;
 }
 
-const norm = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9à-ỹ]+/g, ' ').trim();
+const norm = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9\u00e0-\u1ef9]+/g, ' ').trim();
 const slugOf = (href) => {
     const m = String(href || '').match(/\/([a-z0-9-]+?)(?:\.html)?\/?$/i);
     return m ? m[1].replace(/-/g, ' ') : '';
 };
 
-/** Chọn candidate: khớp title gốc/original TMDB với title site hoặc slug href (token subset). */
+/** Picks candidate: matches TMDB primary/original title against site title or href slug (token subset). */
 export function pickCandidate(candidates, meta) {
     if (!candidates.length) return null;
     const wantTitles = [meta.title, meta.originalTitle].filter(Boolean).map(norm);
@@ -185,7 +185,7 @@ export function parseEpisodeServers(html) {
             const id = (attrs.match(/data-id="([^"]*)"/i) || [])[1] || '';
             const href = (attrs.match(/href="([^"]*)"/i) || [])[1] || '';
             const titleM = attrs.match(/title="([^"]*)"/i);
-            // text sau thẻ mở — tìm đóng </a> gần nhất
+            // Text after opening tag — find nearest closing </a>
             const rest = block.slice(am.index + am[0].length);
             const closeIdx = rest.indexOf('</a>');
             const inner = closeIdx >= 0 ? rest.slice(0, closeIdx) : '';
@@ -194,7 +194,7 @@ export function parseEpisodeServers(html) {
         }
     }
 
-    // 2) fallback: flat .list-episode a (không group)
+    // 2) fallback: flat .list-episode a (ungrouped)
     if (!sawGroup || map.size === 0) {
         const aRe = /<a\b([^>]*href="[^"]*"[^>]*data-hash="[^"]*"[^>]*)>|<a\b([^>]*data-hash="[^"]*"[^>]*href="[^"]*"[^>]*)>/gi;
         let am;
@@ -216,14 +216,14 @@ export function parseEpisodeServers(html) {
 
 const EP_NUM_RE = /\d+([.,]\d+)?/g;
 
-/** epName (title/text nút tập) → số; lấy số CUỐI như CS3 (vd "Tập 12 Full" → 12). */
+/** epName (title/text of episode button) → number; extracts the LAST number like CS3 (e.g. "Tap 12 Full" → 12). */
 function epNumberOf(epName) {
     const matches = String(epName || '').match(EP_NUM_RE);
     if (!matches || !matches.length) return null;
     return parseFloat(matches[matches.length - 1].replace(',', '.'));
 }
 
-/** Watch href của phim → url trang xem (CS3: href đã là xem-phim.html hoặc info → +/xem-phim.html). */
+/** Movie watch href → watch page URL (CS3: href already has xem-phim.html or info → +/xem-phim.html). */
 function toWatchUrl(base, href) {
     let u = String(href || '');
     if (u.startsWith('/')) u = base + u;
@@ -233,7 +233,7 @@ function toWatchUrl(base, href) {
 
 /**
  * POST /ajax/player per server → link.
- * Trả [{groupName, url, isGoogleCdn, playTech}].
+ * Returns [{groupName, url, isGoogleCdn, playTech}].
  */
 export async function resolveServers(base, servers, referer) {
     const out = [];
@@ -251,16 +251,15 @@ export async function resolveServers(base, servers, referer) {
                 playTech,
                 isGoogleCdn: playTech === 'iframe' && link.includes('googleapiscdn.com'),
             });
-        } catch (e) { /* server tiếp */ }
+        } catch (e) { /* next server */ }
     }
     return out;
 }
 
 /**
- * Nhánh googleapiscdn: player page → avsToken → playlist encrypted → processEncryptedM3u8.
- * KẾT QUẢ KHÔNG DELIVER được (Nuvio stream item chỉ nhận URL; playlist đã giải
- * chỉ tồn tại trong interceptor của CS3). Giữ hàm để test + nếu sau này app có
- * cơ chế inject playlist thì bật lại.
+ * googleapiscdn branch: player page → avsToken → encrypted playlist → processEncryptedM3u8.
+ * RESULT CANNOT BE DELIVERED (Nuvio stream items only accept URLs; decrypted playlist
+ * only existed inside CS3 OkHttp interceptor). Retained for testing and future playlist injection.
  */
 export async function decryptGoogleApisCdn(playerUrl, referer) {
     const hashM = playerUrl.match(/\/player\/([0-9a-f]+)/);
@@ -283,7 +282,7 @@ export async function decryptGoogleApisCdn(playerUrl, referer) {
             }
             const text = processEncryptedM3u8(body, headers, avsToken);
             if (text) return { url: m3u8Url, text };
-        } catch (e) { /* thử lại */ }
+        } catch (e) { /* retry */ }
     }
     return null;
 }
@@ -299,11 +298,11 @@ export async function extractStreams(tmdbId, mediaType, season, episode) {
     const numericId = await resolveTmdbId(tmdbId, mediaType);
     const meta = await tmdbMeta(numericId, mediaType);
     if (!meta.title) {
-        console.warn(`[AnimeVietSub] TMDB không có title cho ${mediaType} ${tmdbId}`);
+        console.warn(`[AnimeVietSub] TMDB returned no title for ${mediaType} ${tmdbId}`);
         return [];
     }
 
-    // Search: suggest trước (nhanh, theo CS3), rỗng → trang tim-kiem.
+    // Search: suggest first (fast, per CS3), fallback to tim-kiem search page.
     let candidates = [];
     const queries = [meta.title, meta.originalTitle].filter(Boolean);
     for (const q of queries) {
@@ -331,7 +330,7 @@ export async function extractStreams(tmdbId, mediaType, season, episode) {
     const epMap = parseEpisodeServers(watchHtml);
     if (!epMap.size) return [];
 
-    // Chọn tập: so khớp epNumber(title/text) với episode yêu cầu; movie → entry đầu.
+    // Episode selection: match epNumber(title/text) against requested episode; movie → first entry.
     let servers = null;
     if (tv) {
         const want = parseFloat(episode);
@@ -340,9 +339,9 @@ export async function extractStreams(tmdbId, mediaType, season, episode) {
             if (n !== null && Math.abs(n - want) < 0.001) { servers = list; break; }
         }
     } else {
-        // Movie: ưu tiên epName có "Full"/"Hoàn tất", không thì entry đầu
+        // Movie: prefer epName with "Full"/complete marker, fallback to first entry
         for (const [epName, list] of epMap) {
-            if (/full|ho[aà]n t[aấ]t|tap full/i.test(epName)) { servers = list; break; }
+            if (/full|ho[a\u00e0]n t[a\u1ea5]t|tap full/i.test(epName)) { servers = list; break; }
         }
         if (!servers) servers = epMap.values().next().value;
     }
@@ -353,8 +352,8 @@ export async function extractStreams(tmdbId, mediaType, season, episode) {
     const seen = new Set();
     for (const l of links) {
         if (l.isGoogleCdn) {
-            // Nhánh decrypt: playlist sau giải mã không có URL riêng → không emit.
-            // (processEncryptedM3u8 đã port trong decrypt.js; bật lại khi app hỗ trợ.)
+            // Decrypt branch: decrypted playlist has no standalone URL → do not emit.
+            // (processEncryptedM3u8 ported in decrypt.js; enable when app supports it.)
             continue;
         }
         if (!/^https?:/i.test(l.url)) continue;

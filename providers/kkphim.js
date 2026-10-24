@@ -1,6 +1,6 @@
 /**
  * kkphim - Built from src/kkphim/
- * Generated: 2026-09-10T12:31:19.594Z
+ * Generated: 2026-10-24T16:39:03.770Z
  */
 var __defProp = Object.defineProperty;
 var __defProps = Object.defineProperties;
@@ -51,8 +51,6 @@ var CONFIG = {
     Accept: "application/json"
   },
   PROVIDER_NAME: "KKPhim",
-  // true  → season lệch thì fallback tìm item "Phần N" khác; cuối cùng ko có → []
-  // false → dùng item /tmdb dù lệch season, title ghi "[Phần {N}]" để user tự quyết
   STRICT_SEASON: true,
   TMDB_API_BASE: "https://api.themoviedb.org/3",
   TMDB_API_KEY: "1865f43a0549ca50d341dd9ab8b29f49"
@@ -101,7 +99,7 @@ function request(_0) {
         } catch (e2) {
         }
       }
-      throw new Error(e && e.name === "AbortError" ? `timeout sau ${TIMEOUT_MS}ms` : e && e.message || "fetch error");
+      throw new Error(e && e.name === "AbortError" ? `timeout after ${TIMEOUT_MS}ms` : e && e.message || "fetch error");
     }
   });
 }
@@ -167,17 +165,17 @@ function resolveTmdbId(tmdbId, mediaType) {
     if (/^\d+$/.test(raw))
       return raw;
     if (!IMDB_ID_RE.test(raw))
-      throw new Error(`id kh\xF4ng h\u1EE3p l\u1EC7: "${raw}"`);
+      throw new Error(`invalid id: "${raw}"`);
     const url = `${CONFIG.TMDB_API_BASE}/find/${raw}?api_key=${CONFIG.TMDB_API_KEY}&external_source=imdb_id`;
     const data = yield fetchJson(url);
     const results = mediaType === "movie" ? data.movie_results : data.tv_results;
     const id = Array.isArray(results) && results[0] && results[0].id;
     if (!id)
-      throw new Error(`kh\xF4ng resolve \u0111\u01B0\u1EE3c TMDB id t\u1EEB "${raw}"`);
+      throw new Error(`could not resolve TMDB id from "${raw}"`);
     return String(id);
   });
 }
-var PHAN_NAME_RE = /\(Phần\s*(\d+)\)/i;
+var PHAN_NAME_RE = /\(Ph\u1ea7n\s*(\d+)\)/i;
 var PHAN_SLUG_RE = /-phan-(\d+)$/i;
 function parsePhan(item) {
   const name = item && item.name || "";
@@ -186,7 +184,7 @@ function parsePhan(item) {
   return m ? Number(m[1]) : 1;
 }
 function seasonKeyword(name) {
-  return String(name || "").replace(/\s*\(Phần\s*\d+\)\s*$/i, "").replace(/\s*\(Season\s*\d+\)\s*$/i, "").trim();
+  return String(name || "").replace(/\s*\(Ph\u1ea7n\s*\d+\)\s*$/i, "").replace(/\s*\(Season\s*\d+\)\s*$/i, "").trim();
 }
 function searchSeasonFallback(movie, season, episode, options, base) {
   return __async(this, null, function* () {
@@ -337,20 +335,20 @@ function extractStreams(_0, _1, _2, _3) {
       try {
         streams = yield searchSeasonFallback(data.movie, season, episode, options, base);
         if (streams.length) {
-          console.warn(`[KKPhim] TV ${resolved}: fallback theo t\xEAn VN l\u1EA5y \u0111\u01B0\u1EE3c ${streams.length} streams cho Season ${season}.`);
+          console.warn(`[KKPhim] TV ${resolved}: Vietnamese title fallback resolved ${streams.length} streams for Season ${season}.`);
         }
       } catch (e) {
-        console.warn(`[KKPhim] TV ${resolved}: fallback search l\u1ED7i: ${e.message}`);
+        console.warn(`[KKPhim] TV ${resolved}: search fallback error: ${e.message}`);
       }
     }
     if (streams.length === 0 && (!data || data.status !== true || !data.movie)) {
       try {
         streams = yield titleSearchFallback(resolved, mediaType, season, episode, options, base);
         if (streams.length) {
-          console.warn(`[KKPhim] ${mediaType} ${resolved}: kh\xF4ng c\xF3 tag tmdb tr\xEAn KKPhim, t\xECm theo title -> ${streams.length} streams.`);
+          console.warn(`[KKPhim] ${mediaType} ${resolved}: missing TMDB tag on KKPhim, matched by title -> ${streams.length} streams.`);
         }
       } catch (e) {
-        console.warn(`[KKPhim] ${mediaType} ${resolved}: title fallback l\u1ED7i: ${e.message}`);
+        console.warn(`[KKPhim] ${mediaType} ${resolved}: title fallback error: ${e.message}`);
       }
     }
     return streams;
@@ -368,7 +366,7 @@ function toStreams(data, mediaType, season, episode, options = {}) {
   if (mediaType === "tv" && tmdbSeason != null && Number(season) !== tmdbSeason) {
     if (strictSeason) {
       console.warn(
-        `[KKPhim] TV ${movie.tmdb ? movie.tmdb.id : "?"}: y\xEAu c\u1EA7u Season ${season} nh\u01B0ng item /tmdb ch\u1EC9 c\xF3 Season ${tmdbSeason} -> th\u1EED t\xECm item Ph\u1EA7n ${season} theo t\xEAn...`
+        `[KKPhim] TV ${movie.tmdb ? movie.tmdb.id : "?"}: requested Season ${season} but /tmdb item only has Season ${tmdbSeason} -> attempting title fallback...`
       );
       return [];
     }
@@ -395,9 +393,9 @@ function toStreams(data, mediaType, season, episode, options = {}) {
         title: buildTitle(ep, server, isMovie ? null : labelFor(tmdbSeason, season, strictSeason)),
         url,
         quality: parseQuality(ep.filename, movie.quality),
-        // headers phòng hờ: plugin runtime chỉ giữ item["headers"] top-level →
-        // player mang UA/Accept khi CDN bật chặn non-browser. KHÔNG thêm
-        // Referer/Origin (sai host có thể khiến CDN đang chạy tốt trả 403).
+        // Precautionary headers: plugin runtime only preserves top-level item["headers"] →
+        // player includes UA/Accept if CDN blocks non-browser traffic. Do NOT add
+        // Referer/Origin (mismatched host can cause working CDNs to return 403).
         headers: {
           "User-Agent": CONFIG.HEADERS["User-Agent"],
           Accept: "*/*"
@@ -406,7 +404,7 @@ function toStreams(data, mediaType, season, episode, options = {}) {
     });
   });
   if (!isMovie && streams.length === 0) {
-    console.warn(`[KKPhim] TV ${movie.tmdb ? movie.tmdb.id : "?"}: kh\xF4ng c\xF3 stream cho S${season}E${episode} (KKPhim \u0111ang gi\u1EEF S${tmdbSeason != null ? tmdbSeason : "?"}).`);
+    console.warn(`[KKPhim] TV ${movie.tmdb ? movie.tmdb.id : "?"}: no streams for S${season}E${episode} (KKPhim has S${tmdbSeason != null ? tmdbSeason : "?"}).`);
   }
   return streams;
 }

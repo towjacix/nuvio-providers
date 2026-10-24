@@ -3,10 +3,11 @@ import { CONFIG } from './config.js';
 const TIMEOUT_MS = 15000;
 
 /**
- * Fetch với timeout TÙY MÔI TRƯỜNG (pattern kkphim/vidking):
- * - Node (test/e2e): setTimeout/clearTimeout có sẵn → abort sau 15s.
- * - Runtime app Nuvio (quickjs-kt): KHÔNG inject setTimeout → không gọi (TypeError giết script),
- *   __native_fetch chạy đồng bộ (runBlocking) nên timer JS không bao giờ kịp abort.
+ * Fetch with environment-dependent timeout (kkphim/vidking pattern):
+ * - Node (test/e2e): setTimeout/clearTimeout available → abort after 15s.
+ * - Nuvio app runtime (quickjs-kt): setTimeout NOT injected → must not call it (TypeError kills
+ *   the script); __native_fetch runs synchronously (runBlocking) so a JS timer could never fire
+ *   in time to abort anyway.
  */
 async function request(url, options = {}) {
     const hasTimers = typeof setTimeout === 'function' && typeof clearTimeout === 'function';
@@ -47,10 +48,10 @@ async function request(url, options = {}) {
             try { clearTimeout(timer); } catch (e2) { /* noop */ }
         }
         const msg = (e && e.name === 'AbortError')
-            ? `timeout sau ${TIMEOUT_MS}ms`
+            ? `timeout after ${TIMEOUT_MS}ms`
             : (e && e.message) || 'fetch error';
         const err = new Error(msg);
-        // Giữ HTTP status để tầng gọi phân biệt lỗi mạng (retry được) vs 4xx (không retry).
+        // Keep HTTP status so the caller can tell network errors (retryable) from 4xx (not).
         if (/^HTTP (\d+)/.test(msg)) err.status = Number(msg.match(/^HTTP (\d+)/)[1]);
         throw err;
     }
@@ -58,7 +59,7 @@ async function request(url, options = {}) {
 
 const RETRYABLE = (e) => !(e && e.status && e.status >= 400 && e.status < 500);
 
-/** Site chậm (~6s/hop) + hay reset kết nối → retry 1 lần ngay cho lỗi mạng/timeout. */
+/** Site is slow (~6s/hop) and often resets connections → retry once for network/timeout errors. */
 async function requestWithRetry(url, options = {}) {
     try {
         return await request(url, options);

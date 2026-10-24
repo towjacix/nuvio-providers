@@ -8,8 +8,6 @@ export const CONFIG = {
 
     PROVIDER_NAME: 'KKPhim',
 
-    // true  → season lệch thì fallback tìm item "Phần N" khác; cuối cùng ko có → []
-    // false → dùng item /tmdb dù lệch season, title ghi "[Phần {N}]" để user tự quyết
     STRICT_SEASON: true,
 
     TMDB_API_BASE: 'https://api.themoviedb.org/3',
