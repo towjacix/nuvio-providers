@@ -103,6 +103,27 @@
       "contentLanguage": [
         "vi"
       ]
+    },
+    {
+      "id": "animevietsub",
+      "name": "AnimeVietSub (Anime Vietsub)",
+      "description": "Nguồn anime Vietsub (animevietsub.li). Chỉ hỗ trợ server link trực tiếp — server googleapiscdn cần interceptor ngoài khả năng provider.",
+      "version": "1.0.0",
+      "author": "towjacix",
+      "supportedTypes": [
+        "movie",
+        "tv"
+      ],
+      "filename": "providers/animevietsub.js",
+      "enabled": true,
+      "formats": [
+        "m3u8",
+        "mp4"
+      ],
+      "logo": "https://www.google.com/s2/favicons?domain=animevietsub.li&sz=128",
+      "contentLanguage": [
+        "vi"
+      ]
     }
   ]
 }
